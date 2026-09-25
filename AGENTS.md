@@ -527,7 +527,11 @@ checks it. Repeat with the scratch `drive.py` shape (read back in an
 **Verified 2026-09-25** headlessly: no console errors, warnings or exceptions
 on the local server; Opacity 1 -> 0 with the clock paused changes the canvas by
 a mean 61.5 levels, 1 -> 0.5 by 26.6; moving Opacity by hand switches the rock
-off. Deploy with `cf-run npx wrangler deploy` from the repo root, or push to
+off. The live host shows the same, plus the one console error every `*-demo`
+page has there: Cloudflare's injected `/cdn-cgi/challenge-platform` inline
+script, blocked by the page's `script-src 'self'` CSP (a fleet sweep item, not
+this page's). `tools/` and this README answer 404 there (`.assetsignore`).
+Deploy with `cf-run npx wrangler deploy` from the repo root, or push to
 main: `.github/workflows/deploy.yml` (relay's, renamed) deploys `demo/` and
 checks the live `<head>` is this build.
 
