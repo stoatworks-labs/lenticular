@@ -11,8 +11,10 @@
 > 1 / | 1/p_L − 1/p_P | pixels, measured by FFT to **0.0009 cycles per picture
 > width** in whole and fractional cases; a near viewer's flip lands at D sin T to
 > **0.001 px** (see [Status](#status)). It has **never been loaded into
-> Resolume**, on any platform. It is the fleet's fourth FFGL *mixer*, after
-> genlock, wipe and relay. Check it in your own rig before trusting it in a show.
+> Resolume on macOS**; on Windows, Resolume Arena 7.27.1 loads it and drives its
+> tilt from the layer's fader and from a transition. It is the fleet's fourth
+> FFGL *mixer*, after genlock, wipe and relay. Check it in your own rig before
+> trusting it in a show.
 
 A printed lenticular sheet that shows one layer or the other, as an FFGL
 **mixer** for [Resolume](https://resolume.com) Arena and Avenue. The layer's
@@ -74,7 +76,7 @@ second. The layer's opacity tilts the card from A (0) to B (1).
 interleave does), Interleave Pitch (the print's periods of one A and one B strip
 across the picture width, 4 to 480) and Bleed (the ramp between two strips, as a
 fraction of a strip). Squeeze is first on purpose: Resolume Arena does not show
-a mixer's first parameter (measured on genlock, wipe and relay), so index 0
+a mixer's first parameter (measured on genlock, wipe, relay and this plugin), so index 0
 holds a control whose default — on — is right if nobody can ever reach it.
 
 **Lens** — Lens Pitch (lenses across the picture width, on the same scale as the
@@ -144,7 +146,7 @@ ignored, the lens pitch forced to the print's, the tilt reversed.
 
 ## Status
 
-**v0.1.0, local, unreleased, and honestly early.** Verified by measurement on an
+**v0.1.0, and honestly early.** Verified by measurement on an
 Apple M4 Max, macOS 26.4.1, 2026-09-25, at 640×360 **and** 320×180 unless
 stated, on the GPU and on Apple's software renderer:
 
@@ -163,18 +165,21 @@ stated, on the GPU and on Apple's software renderer:
 | Pipe | 3 frames in, 3 out; Opacity ramps and Squeeze steps between cues; a closed stdout is **exit 1** |
 | macOS binary | universal (`x86_64 arm64`), exports `plugMain`, ad-hoc signs |
 | Host metadata | `oxbow probe` reads **SW Lenticular / LN01 / mixer / inputs 2..2**, parameter 0 **Squeeze** |
+| Resolume Arena 7.27.1 (Windows, llvmpipe) | a CI build loads from Extra Effects, registers as `SW Lenticular` / LN01 / category 2, is offered as a layer **Blend Mode** and as a **transition**, initialises on Mesa; the panel shows **15 of 16** parameters, hiding only **Squeeze** (index 0, on purpose); the layer's opacity 0.2 / 0.85 / 0.5 / 1.0 reached the plugin as `Opacity` (its own log), a write to the mixer's own Opacity was overridden; a 2 s transition ran its own instance from Opacity **0.007 to 0.944** (and 0.003 to 0.985) — probed over REST, no frame of the picture captured |
 | Render cost | **0.021 ms/frame at 720p, 0.035 at 1080p, 0.10 at 4K** (0.6% of a 60 fps frame), worst of three runs on a shared machine |
 
 Run `tools/verify.sh` before believing any of it.
 
 **Not done, and the list is honest.** Lenticular has **never been loaded into
-Resolume** on macOS or Windows; everything above was measured offline, through
-the real plugin class. What Arena does with a mixer — Blend Mode and transition,
-index 0 hidden, `Opacity` bound to the layer's fader, inputs padded — is
-inherited from genlock, wipe and relay, not re-measured here. There is no GitHub
-repo, no CI run and no Windows build yet (the workflows exist and have never
-run). The harness has run on two rasterisers, this Mac's GPU and Apple's
-software renderer; never llvmpipe or another GPU. The ridge highlight, the edge
+Resolume on macOS**. In Arena on Windows it was probed over REST and read back
+from its own log (the table above); no frame of its picture inside Resolume has
+been captured, so a correct render there is not yet shown. **A transition that
+uses it ends with a pop**: Arena's last transition frame had Opacity 0.944, which
+is the new clip seen through the lens, and the next frame is the plain clip — a
+consequence of the lens having no end stops, inferred from the log rather than
+seen. The harness has run on two rasterisers, this Mac's GPU and Apple's software
+renderer; Mesa llvmpipe has compiled and run the shaders in Arena, but no check
+has been read off it. The ridge highlight, the edge
 shading and the residual magnification are looks, not a model of any sheet; the
 lens is a thin lens in air, with no refraction into the plastic. No user guide,
 no presets, no OpenFX port. The browser demo is a port, not the plugin.

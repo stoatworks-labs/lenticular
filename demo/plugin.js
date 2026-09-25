@@ -32,9 +32,9 @@
  *
  * Opacity is a slider on this page, in the View group where the plugin
  * declares it. In Resolume a mixer parameter named Opacity is bound to the
- * LAYER's opacity fader (measured on genlock, wipe and relay in Arena 7.27.1;
- * Lenticular itself has not been loaded into Arena yet). Squeeze (index 0) is
- * shown here; Arena hides a mixer's first parameter. "Rock the card" in the
+ * LAYER's opacity fader (measured on Lenticular itself in Arena 7.27.1 on
+ * Windows, 2026-09-25, as on genlock, wipe and relay). Squeeze (index 0) is
+ * shown here; Arena hides a mixer's first parameter (it hid Squeeze). "Rock the card" in the
  * transport is the page's, not the plugin's: it moves the Opacity slider the
  * way a hand on the layer fader would. The page says all of this in its
  * disclosure.
@@ -330,7 +330,7 @@ const zoneDeg = (focal) => deg(Math.atan(1.0 / (2.0 * focal)));
 const PARAMS = [
   // Index 0, which Resolume Arena does not show for a mixer: on, for ever.
   { id: 'squeeze', name: 'Squeeze', type: 'boolean', default: 1, group: 'Print',
-    hint: 'On: each strip holds its picture squeezed into half a period, as a real interleave does. Off: each strip is a window on the picture at its own position. Index 0: Resolume Arena does not show a mixer’s first parameter (measured on genlock, wipe and relay), so in Arena this stays on. A browser does not hide it.' },
+    hint: 'On: each strip holds its picture squeezed into half a period, as a real interleave does. Off: each strip is a window on the picture at its own position. Index 0: Resolume Arena does not show a mixer’s first parameter (it hid Squeeze in Arena 7.27.1, as it did on genlock, wipe and relay), so in Arena this stays on. A browser does not hide it.' },
   { id: 'interleavePitch', name: 'Interleave Pitch', type: 'standard', default: ParamForPitch(kPitchDefault), group: 'Print',
     display: (v) => `${PitchFromParam(f32(v)).toFixed(2)} / width`,
     hint: 'How many A-then-B strip pairs are printed across the picture width, 4 to 480, geometric. Shares Lens Pitch’s mapping, so the same slider position is the same pitch exactly — no moiré.' },
@@ -353,7 +353,7 @@ const PARAMS = [
 
   { id: 'opacity', name: 'Opacity', type: 'standard', default: 1.0, group: 'View',
     display: (v) => `tilt ${deg(TiltFromParams(f32(v), f32(PAGE.params?.get('angleRange') ?? f32(kAngleRangeDefaultDeg / kAngleRangeMaxDeg)))).toFixed(2)}°`,
-    hint: 'The tilt of the card: 0 is −Angle Range (A), 1 is +Angle Range (B), 0.5 exactly square on. In Resolume this is the LAYER’s opacity fader (measured on the fleet’s other mixers); here it is a slider, and “Rock the card” moves it for you.' },
+    hint: 'The tilt of the card: 0 is −Angle Range (A), 1 is +Angle Range (B), 0.5 exactly square on. In Resolume this is the LAYER’s opacity fader (measured on Lenticular in Arena 7.27.1); here it is a slider, and “Rock the card” moves it for you.' },
   { id: 'angleRange', name: 'Angle Range', type: 'standard', default: f32(kAngleRangeDefaultDeg / kAngleRangeMaxDeg), group: 'View',
     display: (v) => `±${deg(AngleRangeFromParam(f32(v))).toFixed(2)}°`,
     hint: 'The tilt Opacity 0 and 1 stand for, 0 to 45°. Past the viewing zone the next lens’s strips come round and the card flips back.' },
@@ -565,7 +565,7 @@ const mounted = mountDemo({
 
   differences: [
     'Two inputs, both generated here. The kit this page is built on hands a demo one input; Lenticular is a mixer, so B is rendered by a second copy of the kit’s own clip generator at the same raster and on the same clock (wipe’s and relay’s arrangement). They are synthetic test clips, not Resolume’s demo footage. “Use my own…” replaces A only.',
-    'Opacity is a slider. In Resolume Arena a mixer parameter named Opacity is bound to the layer’s opacity fader, and a layer transition ramps it — measured on the fleet’s other mixers (genlock, wipe, relay) in Arena 7.27.1. Lenticular itself has not been loaded into Resolume yet, so that is the expectation, not a measurement of this plugin.',
+    'Opacity is a slider. In Resolume Arena a mixer parameter named Opacity is bound to the layer’s opacity fader, and a layer transition ramps it — measured on Lenticular itself in Arena 7.27.1 on Windows (software rendering), from the plugin’s own log. No frame of its picture inside Resolume has been captured.',
     'Squeeze is parameter 0. Arena hides a mixer’s first parameter (three mixers for three), which is why Squeeze is first and defaults to on — in Arena it will stay on. Here it is shown and can be turned off, because a browser does not hide it.',
     '“Rock the card” is the page’s, not a plugin control. It moves the Opacity slider from 1 to 0 and back every six seconds of the page’s clock, as a hand on the layer fader would; touching Opacity or unticking it stops it. The plugin has no clock at all: in Resolume the card moves only when the fader does.',
     'The CPU half is a port. Controls.cpp (every conversion from the host’s 0..1), Lens.h’s constants and the arithmetic in ProcessOpenGL that turns the parameters into the card’s uniforms are translated to JavaScript by hand in demo/plugin.js. It was compared with the plugin’s own harness (lntest --pipe) on identical inputs at a handful of settings; outside those, only a reader checks it. The shaders themselves are checked: demo/tools/check_shaders.py fails the repository’s verify script if a character drifts from source/Shaders.cpp.',

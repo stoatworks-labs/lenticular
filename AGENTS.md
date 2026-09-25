@@ -4,9 +4,11 @@
 layer or the layer below the way a printed lenticular card does: two pictures cut
 into strips and interleaved under a sheet of cylindrical lenses, with the layer's
 opacity fader tilting the card. C++17 + GLSL 4.10, CMake, universal macOS
-`.bundle` (and a Windows `.dll` that has never been built). MIT. Intended home
-`github.com/stoatworks-labs/lenticular`; today a local repo at `~/dev/lenticular`,
-v0.1.0, unreleased, **never loaded into Resolume**. The fleet's fourth mixer,
+`.bundle` and a Windows x64 `.dll`. MIT. Public at
+`github.com/stoatworks-labs/lenticular` (moved from `~/dev/lenticular` to
+`~/Projects/resolume/lenticular` on 2026-09-25), released at v0.1.0, loaded in
+Resolume Arena 7.27.1 on Windows (see "What Lenticular showed in Arena"), never
+on macOS. The fleet's fourth mixer,
 after genlock, wipe and relay. Tranche five, started 2026-09-25; Allan picked the
 idea.
 
@@ -19,8 +21,9 @@ argument, the input count a separate declaration, which base class, index 0
 hidden, `Opacity` bound to the layer fader and ramped by transitions — read
 genlock's `AGENTS.md` and relay's "What Relay showed in Arena"
 (`~/Projects/resolume/genlock/`, `~/Projects/resolume/relay/`). Nothing here
-contradicts them, and none of it was re-measured here: this repo has never been
-in front of Arena.
+contradicts them. Index 0 hidden, `Opacity` bound to the layer fader, transitions
+driving it and padded inputs were re-measured on this plugin: see "What
+Lenticular showed in Arena".
 
 ---
 
@@ -401,16 +404,17 @@ close to what a `glFinish` round trip costs to observe, and 4K came back at 0.03
 
 **Assumed, or not yet done:**
 
-- **Never loaded into Resolume**, on macOS or Windows. Everything Arena does with
-  a mixer — Extra Effects, Blend Mode and transition lists, index 0 hidden,
-  `Opacity` bound to the layer fader and ramped by a transition, both inputs
-  padded — is genlock's, wipe's and relay's measurement, not this plugin's.
-- **No CI, no Windows build.** The workflows are relay's, renamed; they have never
-  run. The MSVC hazards the fleet knows (`M_PI`, `<cmath>`, `near`/`far`) were
-  checked by reading, not by compiling.
-- **Two rasterisers, not all.** Nothing has run on llvmpipe (the Arena gate's
-  renderer, which found `packed` for atrac) or another GPU. glslc compiles both
-  shaders; Mesa has not seen them.
+- **Never loaded into Resolume on macOS.** On Windows, Arena 7.27.1 on llvmpipe
+  loads it, offers it as a Blend Mode and a transition, hides Squeeze, binds
+  Opacity to the layer fader and ramps it in a transition (above) — from REST and
+  the plugin's log. **No frame of its picture inside Resolume has been
+  captured**, so a correct render there is not claimed, and the pop at a
+  transition's end is inferred.
+- **CI and Windows**: both workflows ran green on the first push (MSVC compiled
+  the first time; the fleet's hazards were checked before it).
+- **Two rasterisers for the checks.** The harness has run on this Mac's GPU and
+  Apple's software renderer. Mesa llvmpipe compiled and ran the shaders in Arena,
+  but no check has been read off it.
 - **The optics are a model.** A thin lens in air, a box spot, a trapezoid print,
   a viewer's eye as a point. The ridge highlight (a 35° lens edge, a 0.06-lens
   highlight), the edge shading and the residual magnification are looks, argued
@@ -424,13 +428,66 @@ close to what a `glFinish` round trip costs to observe, and 4K came back at 0.03
 
 ---
 
+## What Lenticular showed in Arena
+
+A CI build of v0.1.0 (release.yml dispatched on main at 806c9ce, the tagged
+source) in **Resolume Arena 7.27.1** (build 15990) on win-lab — Windows x64,
+Mesa llvmpipe, no GPU — on 2026-09-25. The fleet's Arena gate cannot gate a
+mixer, so it was probed by hand over Arena's REST API (relay's recipe: the
+carrier still on layer 2 and on layer 3, both connected, SW Lenticular as layer
+3's Blend Mode) and read back from the plugin's own diag log, which since
+aa3003f numbers each instance and logs every Opacity change (up to 400 an
+instance) and the last Opacity at DeInitGL — the only evidence a host gives of
+what reached the mixer. The answers to the build's four open questions:
+
+1. **Squeeze (index 0) is hidden. Four for four.** Arena's log registers
+   `'SW Lenticular' uid: LN01 category: 2`; the mixer's REST panel carries 15 of
+   the 16 declared parameters, and the missing one is Squeeze, parked there on
+   purpose. So Squeeze off is unreachable in Arena, and its default (on) is what
+   every Arena user gets.
+2. **`Opacity` is the layer's opacity fader — from inside the plugin.** Layer
+   opacity 0.2, 0.85, 0.5 and 1.0 read back as the mixer's `Opacity`, and the
+   diag log recorded `Opacity 0.200000 at frame 41`, `0.850000 at frame 61`,
+   `0.500000 at frame 80`, `1.000000 at frame 98` (instance #2). A REST write of
+   0.15 to the mixer's own `Opacity` was overridden (read back 1.0, the layer's).
+3. **A layer transition drives the tilt.** With SW Lenticular as layer 3's
+   *transition* blend mode (`transition.blend_mode`, offered there too) and
+   duration 2 s, connecting a second clip made a **separate instance** (#3, its
+   own `Created Lenticular mixer` line), whose Opacity climbed 0.007, 0.278,
+   0.342 ... 0.884, **0.944** over 13 frames (llvmpipe rendered ~6 fps); the
+   transition back climbed 0.003 ... **0.985** over 14 frames in the SAME
+   instance, which Arena kept and reused. So a transition tilts the card from
+   the old clip (A) to the new one (B): the flip happens as the transition
+   crosses its middle.
+4. **The card pops at a transition's end — inferred, not seen.** The
+   transition's last rendered frame was at Opacity 0.944 (and 0.985 on the
+   second): Arena never handed the mixer 1.0, and after that frame the layer
+   shows the new clip without the transition's mixer. At 0.944 the tilt is
+   +7.1°, F tan t = 0.22, so every lens's focus sits on B's flat part: the last
+   transition frame is B **through the lens**, stepped at the lens pitch and
+   ridged (`--ends` measures exactly that at 1.0), and the next frame is the plain
+   clip. The step from card to plain picture is the pop the build predicted. No
+   frame of the output could be captured (Arena's REST serves no mixer picture),
+   so this is the log plus the model, not a picture of Arena.
+
+Also seen: both inputs arrive padded, `A 1280x720 of 1280x768, B 1280x720 of
+1280x768, out 1280x720` (genlock's measurement, repeated); the shaders compiled
+and initialised on Mesa llvmpipe 26.2.0 (`GL vendor=Mesa renderer=llvmpipe`),
+so Mesa has now seen them; no error lines in either log. The layer's instance
+started at Opacity 0.5 because the layer's fader was there when the probe
+mounted it.
+
+---
+
 ## Open questions
 
 1. **Should Opacity 0 and 1 be end stops?** A transition that uses this mixer
-   ends with a pop from the lenticular card to the plain clip. An option that
-   crossfades the lens away over the last few percent of the fader would fix it
-   and break `--ends`' meaning at that setting. Not attempted: it needs Arena to
-   show what a transition's last frame looks like.
+   ends with a pop from the lenticular card to the plain clip — now inferred
+   from Arena's own numbers: its last transition frame was at Opacity 0.944 or
+   0.985, B through the lens, and then the plain clip. An option that
+   crossfades the lens away over the last few percent of the fader would fix
+   it, but it would have to start well below 0.94 (Arena never sends 1.0), and
+   it would break `--ends`' meaning at that setting. Left for a later release.
 2. **Should the print's registration to the lens be a control?** A card printed
    a fraction of a strip off-axis flips at another angle — a real defect, one
    parameter away (it is the constant `0.5` the shipped mutation moves).
@@ -446,9 +503,8 @@ close to what a `glFinish` round trip costs to observe, and 4K came back at 0.03
    frames as blends" was left at N = 2: two inputs, two strips, and the ghost is
    the in-between. An N-strip print of blends of A and B is a Frames control away,
    and the coverage integral generalises (N ramps a period).
-6. **Does Arena hide Squeeze, and does a transition drive the tilt?** Three for
-   three on the previous mixers; not measured on this one. The diag log records the
-   first 16 Opacity changes for exactly this.
+6. ~~Does Arena hide Squeeze, and does a transition drive the tilt?~~ **Yes and
+   yes — answered in Arena 7.27.1 on 2026-09-25** (above).
 
 ---
 
@@ -502,9 +558,9 @@ checks it. Repeat with the scratch `drive.py` shape (read back in an
   generated test clips, not Resolume's demo footage. Defaults: A the synthetic
   scene, B colour bars.
 - **Opacity is a slider**, in the View group where the plugin declares it, with
-  the plugin's default of 1. In Arena it is expected to be the layer's opacity
-  fader (the fleet's other three mixers); not measured on this plugin, and the
-  disclosure says so.
+  the plugin's default of 1. In Arena it is the layer's opacity fader,
+  measured on this plugin in Arena 7.27.1 (see "What Lenticular showed in
+  Arena"), and the disclosure says so.
 - **Squeeze is shown**, although Arena hides a mixer's parameter 0: a browser
   does not, and hiding it would be inventing a host behaviour. Disclosed.
 - **"Rock the card" is a transport checkbox, not a parameter**, on by default
