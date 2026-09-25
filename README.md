@@ -28,6 +28,12 @@ catch the light as thin stripes; and because the print's pitch misses the
 lens's, the flip happens in bands 466 px (about a third of the picture) apart, soft
 where the focus straddles both strips.</sub>
 
+**[Try it in your browser](https://lenticular-demo.stoatworks-labs.com)** — the
+plugin's own shader in WebGL2 with its parameter conversions ported to
+JavaScript, flipping between two generated clips. A port, not the plugin: the
+page lists everything it does not reproduce, starting with the fact that in
+Resolume the card is tilted by the layer's opacity fader, not a slider.
+
 ## A lenticular card is two pictures and a sheet of lenses
 
 A lenticular print is two pictures cut into thin strips and interleaved, A, B,
@@ -171,7 +177,7 @@ run). The harness has run on two rasterisers, this Mac's GPU and Apple's
 software renderer; never llvmpipe or another GPU. The ridge highlight, the edge
 shading and the residual magnification are looks, not a model of any sheet; the
 lens is a thin lens in air, with no refraction into the plastic. No user guide,
-no presets, no OpenFX port, no browser demo.
+no presets, no OpenFX port. The browser demo is a port, not the plugin.
 
 [AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
 measured, the open questions, and the traps.

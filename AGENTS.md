@@ -419,7 +419,8 @@ close to what a `glFinish` round trip costs to observe, and 4K came back at 0.03
 - **Vertical lenticules only.** Real cards are also made with horizontal ones
   (flip by tipping, not turning); not a control.
 - **The hero image** is the harness's render, not Resolume's.
-- No user guide, no presets, no OpenFX port, no browser demo.
+- No user guide, no presets, no OpenFX port. The browser demo exists and is a
+  port, not the plugin; see *The browser demo* below.
 
 ---
 
@@ -448,6 +449,87 @@ close to what a `glFinish` round trip costs to observe, and 4K came back at 0.03
 6. **Does Arena hide Squeeze, and does a transition drive the tilt?** Three for
    three on the previous mixers; not measured on this one. The diag log records the
    first 16 Opacity changes for exactly this.
+
+---
+
+## The browser demo
+
+**<https://lenticular-demo.stoatworks-labs.com>**, served from `demo/` by this
+repo's own Worker (`wrangler.toml`). Built 2026-09-25 on the shared kit
+(`stoatworks-backend/resolume-demo`, vendored into `demo/vendor/` by
+`sync.sh`), wipe's and relay's two-input arrangement.
+
+**What runs for real.** The plugin's two shaders, `kVertexShader` and
+`kLenticularShader`, spliced into `demo/plugin.js` from `source/Shaders.cpp` by
+script, unedited, and compiled by the kit's `port()` (the version line and
+precision qualifiers, nothing else) into WebGL2. Every uniform `ProcessOpenGL`
+sets is set by the page (`OutSize` through `glUniform2i`, `Squeeze` and `Fault`
+as ints). `demo/tools/check_shaders.py` compares the copies with the C++
+character for character and `tools/verify.sh` runs it (negative-controlled: one
+added `+ 0.0` in the JS copy fails it at line 171).
+
+**What is a port.** `demo/plugin.js` carries Controls.cpp (every `...FromParam`
+and the `ParamFor...` the constructor's defaults use, on float32-rounded
+values as the plugin's floats are), Lens.h's constants, and the arithmetic of
+`ProcessOpenGL` that makes a `lens::Setup` and the uniforms from it (the
+ratio, the spot clamped to 4 periods, half the bleed, the tilt, the shine, the
+distortion, the highlight width's pixel floor). The plugin is stateless, so
+there is no frame logic to port.
+
+**Checked against the harness, 2026-09-25.** The page's own A, B and output
+were read back from WebGL (ANGLE on Metal, Apple M4 Max, headless Chrome), A
+fed to `lntest --pipe` on stdin and B through `--pipe-src`, with the same
+parameters through `--set`, at 640x360, for two clip pairs (scene/bars at
+t 1.25 s, grid/detail at 3.5 s) and six settings: the defaults; Opacity 0.5
+(square on); Opacity 0 (tilted to A); a detuned lens pitch with a near viewer,
+a wide spot and bleed; fat unsqueezed lenses at Ridge Shine 1 with Light Angle
+and Focal Length moved; a 45° range with an ideal lens at infinity. **All
+twelve agree within 1/255 per channel** (at most 482 of 921,600 channel values
+differ, none by more than 1; the ideal-lens case is bit-identical). The negative
+controls fail as they should: the pipe at Opacity 0.97 against the page's 1.0
+differs by up to 10 and 62 levels, Lens Pitch 0.57 against 0.5657 by up to
+255 and 227. That covers the port at those settings; elsewhere only a reader
+checks it. Repeat with the scratch `drive.py` shape (read back in an
+`afterRender` hook, `window.__lenticularDemo.hooks`).
+
+**Decisions taken without asking:**
+
+- **Two inputs from one kit**, as wipe and relay did. A (the layer below,
+  `inputTextures[0]`) is the kit's clip, relabelled `Clip A`, the only one
+  "Use my own…" replaces. B (this layer) is a second `SourceRenderer` from the
+  kit's `sources.js`, same raster and clock, picked by the kit's one extra
+  transport dropdown (`Clip B`; `?clipb=<id>` in the URL). Both are the kit's
+  generated test clips, not Resolume's demo footage. Defaults: A the synthetic
+  scene, B colour bars.
+- **Opacity is a slider**, in the View group where the plugin declares it, with
+  the plugin's default of 1. In Arena it is expected to be the layer's opacity
+  fader (the fleet's other three mixers); not measured on this plugin, and the
+  disclosure says so.
+- **Squeeze is shown**, although Arena hides a mixer's parameter 0: a browser
+  does not, and hiding it would be inventing a host behaviour. Disclosed.
+- **"Rock the card" is a transport checkbox, not a parameter**, on by default
+  (`?rock=0` turns it off; off by default in embed mode, `?rock=1` there). It
+  sets the Opacity slider to 0.5 + 0.5 cos( 2 pi t / 6 s ) of the page's clock,
+  so a visitor sees the card flip without finding the slider; touching Opacity
+  or unticking it stops it. The plugin has no clock; disclosed.
+- **Both MaxUVs are 1**: the page's textures are unpadded. Disclosed.
+- **Alpha is not shown**: the canvas draws over black. Disclosed.
+- **A statistics line under the picture** reports what the port computed: the
+  tilt, the lens count and pixels a lens, the viewing zone, the moiré period,
+  where a near viewer's square-on flip lands. Not the plugin.
+- **Presets are the page's**; the plugin declares none.
+- **Absent:** the About block; `Fault` is 0 as shipped. No audio path.
+- **The host is a Worker route, not a custom domain** (the zone's 100 Workers
+  custom domains are used up): `lenticular-demo` is a proxied AAAA `100::`
+  record made through the API plus a `[[routes]]` entry in `wrangler.toml`.
+  Deleting the record takes the page dark while deploys stay green.
+
+**Verified 2026-09-25** headlessly: no console errors, warnings or exceptions
+on the local server; Opacity 1 -> 0 with the clock paused changes the canvas by
+a mean 61.5 levels, 1 -> 0.5 by 26.6; moving Opacity by hand switches the rock
+off. Deploy with `cf-run npx wrangler deploy` from the repo root, or push to
+main: `.github/workflows/deploy.yml` (relay's, renamed) deploys `demo/` and
+checks the live `<head>` is this build.
 
 ---
 

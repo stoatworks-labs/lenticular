@@ -8,6 +8,10 @@
 #                 before a host has to find out. A shader that will not
 #                 compile presents to an operator as "the mixer does
 #                 nothing", with the real message buried in the log.
+#   demo          the browser demo's copies of the shaders are the plugin's,
+#                 character for character (demo/tools/check_shaders.py). The
+#                 page claims to run this plugin's GLSL; nothing else would
+#                 notice if the two copies drifted apart
 #   build         a fresh universal Release build, which is what ships
 #   suites        the plugin's claims, measured at TWO rasters: two inputs
 #                 at two sizes with two MaxUVs, the card tilted all the way
@@ -150,6 +154,19 @@ if shaders_compile; then
 	pass "every shader compiles"
 else
 	fail "a shader does not compile"
+fi
+
+#---------------------------------------------------------------------------
+# The browser demo's shaders. demo/plugin.js carries a copy of every shader in
+# source/Shaders.cpp; a copy that drifts still renders a plausible card, so
+# only an exact comparison catches it.
+#---------------------------------------------------------------------------
+step "demo"
+if python3 demo/tools/check_shaders.py >"$LOGS/demo.txt" 2>&1; then
+	pass "$( tail -1 "$LOGS/demo.txt" )"
+else
+	sed 's/^/   /' "$LOGS/demo.txt"
+	fail "the demo's shaders have drifted -- copy source/Shaders.cpp across into demo/plugin.js"
 fi
 
 #---------------------------------------------------------------------------

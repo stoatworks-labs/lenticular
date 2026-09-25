@@ -55,6 +55,8 @@ touching `ProcessOpenGL`.
 - No dead controls: `python3 tools/sweep.py` (`--size WxH`, `--jobs N`)
 - Any check on Apple's software renderer, as the GPU-less CI runner gets it:
   `LNTEST_RENDERER=software ./build/lntest --moire` (verify.sh runs them all)
+- The browser demo's shaders are still the plugin's:
+  `python3 demo/tools/check_shaders.py` (verify.sh runs it)
 - The harness writes the plugin's log; point `LENTICULAR_LOG_DIR` elsewhere
   before running it around an Arena session (verify.sh does).
 
@@ -109,6 +111,19 @@ Every numeric check runs at 640x360 and 320x180 (`--mixer` at 320x200 and
 - GLSL reserved words to avoid: `patch sample input output filter common active
   half layout flat packed smooth round`, and the rest of GLSL 4.10's list.
   MSVC: no `M_PI` (use `kPi`), include `<cmath>`, never `near`/`far`.
+- `demo/` is the browser demo at lenticular-demo.stoatworks-labs.com: the
+  plugin's two shaders unedited (spliced from `Shaders.cpp` by script), and
+  Controls.cpp, Lens.h's constants and `ProcessOpenGL`'s uniform arithmetic
+  hand-ported in `demo/plugin.js`. A **mixer**: A is the kit's clip, B a second
+  generated clip (the transport's `Clip B`). `demo/vendor/` is the shared kit --
+  do not edit it; it is copied in by `stoatworks-backend/resolume-demo/sync.sh
+  lenticular`. Serve with `python3 -m http.server` in `demo/`; deploy from the
+  repo root with `cf-run npx wrangler deploy` (no build step; the host is a
+  Worker ROUTE plus a proxied AAAA `100::` record, not a custom domain);
+  `.github/workflows/deploy.yml` also ships it on every push to main that
+  touches more than docs. Change a shader, Controls.cpp, Lens.h or
+  ProcessOpenGL and the demo needs the same change -- the checker catches only
+  the shaders. See AGENTS.md, "The browser demo".
 - FFGL id is `LN01`. Display name `SW Lenticular`.
 - `StoatworksAbout.h` and `ATTRIBUTIONS.md` are PROVISIONAL hand copies (guide
   empty: no user guide yet); the backend's syncs will overwrite them once the
@@ -117,7 +132,8 @@ Every numeric check runs at 640x360 and 320x180 (`--mixer` at 320x200 and
 ## Not done yet
 - **Never loaded into Resolume**, on any platform. No GitHub repo, no CI run,
   no Windows build, no release.
-- No user guide, no presets, no OpenFX port, no browser demo.
+- No user guide, no presets, no OpenFX port. The browser demo exists; it is a
+  port, not the plugin.
 
 ## Diagnostics
 
