@@ -36,6 +36,18 @@ JavaScript, flipping between two generated clips. A port, not the plugin: the
 page lists everything it does not reproduce, starting with the fact that in
 Resolume the card is tilted by the layer's opacity fader, not a slider.
 
+[![Lenticular — a printed lenticular card that shows one layer or the other, for Resolume](docs/video-thumb.png)](https://www.youtube.com/watch?v=I9bclzMmib4)
+
+*[Watch it](https://www.youtube.com/watch?v=I9bclzMmib4) — 51 seconds:
+the fader tilting the card while the flip travels across it for a near viewer,
+the whole card flipping at once with the viewer at infinity, the ghost of a wide
+focus spot, moiré bands from a print pitch of 64 under 60 lenses, the card turned
+past the edge of its viewing zone so it flips back, and 16 coarse lenses with the
+light swinging across the ridges. Every frame is the real plugin's output: an
+FFGL plugin has no window, so the footage is rendered by this repository's own
+offline harness (`lntest --pipe`, driven by a cue sheet) rather than filmed off a
+screen, and the two pictures are Resolume's bundled demo media.*
+
 ## A lenticular card is two pictures and a sheet of lenses
 
 A lenticular print is two pictures cut into thin strips and interleaved, A, B,
