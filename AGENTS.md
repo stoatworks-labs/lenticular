@@ -358,7 +358,10 @@ clip when Resolume stops using it. See the open questions.
 
 **No clock.** Nothing in a card moves unless the viewer or the card does, so
 `SetTime` is not overridden and the harness drives no clock. The fleet's float
-clock trap does not arise.
+clock trap does not arise. `oxbow probe` still reads `set-time: yes`: that is the
+SDK's default declaration, left alone because saying "no" to a host that then
+behaves differently is a host behaviour nobody has measured, and the base class's
+`SetTime` only stores the value.
 
 **No presets.** Eleven controls in three groups.
 
