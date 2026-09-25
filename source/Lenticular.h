@@ -132,6 +132,7 @@ private:
 
 	//The host-session log: what reached the mixer. Nothing renders from it.
 	unsigned long frames   = 0;
+	int instance           = 0;
 	int opacityLines       = 0;
 	float loggedOpacity    = -1.0f;
 	unsigned guardsLogged  = 0;

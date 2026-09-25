@@ -45,9 +45,15 @@ std::string sizeText( const FFGLTextureStruct& t )
 	       + std::to_string( t.HardwareHeight );
 }
 
-/// How many Opacity changes the log records. Enough to see the fader or a
-/// transition move it; not a line a frame for the length of a show.
-constexpr int kOpacityLines = 16;
+/// How many Opacity changes the log records, per instance. Enough to follow a
+/// whole layer transition frame by frame (a 2 s fade at 60 fps is 120), which
+/// is what says what the card looked like on a transition's LAST frame; not a
+/// line a frame for the length of a show.
+constexpr int kOpacityLines = 400;
+
+/// Instances are numbered in creation order, so a host session's log can tell
+/// the layer's mixer from a transition's (Arena makes separate instances).
+int gInstances = 0;
 } // namespace
 
 Lenticular::Lenticular()
@@ -130,6 +136,7 @@ Lenticular::Lenticular()
 	FFGLLog::LogToHost( "Created Lenticular mixer" );
 
 	diag::init();
+	instance = ++gInstances;
 }
 
 //---------------------------------------------------------------------------
@@ -155,7 +162,8 @@ FFResult Lenticular::InitGL( const FFGLViewportStruct* vp )
 		return FF_FAIL;
 	}
 
-	diag::info( "initialised, viewport " + std::to_string( vp ? vp->width : 0 ) + "x" + std::to_string( vp ? vp->height : 0 ) );
+	diag::info( "initialised, viewport " + std::to_string( vp ? vp->width : 0 ) + "x" + std::to_string( vp ? vp->height : 0 )
+	            + " (instance #" + std::to_string( instance ) + ")" );
 
 	//Use base-class init as the success result so it retains the viewport.
 	return CFFGLPlugin::InitGL( vp );
@@ -217,7 +225,8 @@ FFResult Lenticular::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	{
 		//The only evidence a host gives of what drives a mixer's Opacity:
 		//the layer fader, a transition, or the mixer's own slider.
-		diag::info( "Opacity " + std::to_string( params[ PT_OPACITY ] ) + " at frame " + std::to_string( frames ) );
+		diag::info( "Opacity " + std::to_string( params[ PT_OPACITY ] ) + " at frame " + std::to_string( frames )
+		            + " (instance #" + std::to_string( instance ) + ")" );
 		loggedOpacity = params[ PT_OPACITY ];
 		++opacityLines;
 	}
@@ -302,7 +311,8 @@ FFResult Lenticular::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 FFResult Lenticular::DeInitGL()
 {
 	if( frames > 0 )
-		diag::info( "DeInitGL after " + std::to_string( frames ) + " frames" );
+		diag::info( "DeInitGL after " + std::to_string( frames ) + " frames, last Opacity " + std::to_string( params[ PT_OPACITY ] )
+		            + " (instance #" + std::to_string( instance ) + ")" );
 	shader.FreeGLResources();
 	quad.Release();
 	return FF_SUCCESS;
