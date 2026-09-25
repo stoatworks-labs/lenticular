@@ -1,11 +1,10 @@
 # Attributions
 
-Lenticular is built on other people's work. This file lists what that work is, who
-did it, and what it is doing here.
+Lenticular is built on other people's work. This file lists what that work is, who did
+it, and what it is doing here.
 
-It is a provisional hand copy in the shape `stoatworks-backend`'s
-`scripts/sync-attributions.py` generates: Lenticular is not in the master lists yet.
-When it is registered, the sync overwrites this file.
+It is generated — the master lists live in the `stoatworks-backend` repo and are
+pushed out by `scripts/sync-attributions.py`. Edit it there, not here.
 
 ## Code we derived from other people's work
 
@@ -45,9 +44,9 @@ Libraries, SDKs and frameworks the project is built on or bundles.
 Licence: BSD-3-Clause  
 Copyright: FreeFrame
 
-Vendored as a git submodule at external/ffgl, pinned to b1afaf9 like the rest of the fleet.
+Vendored as a git submodule at external/ffgl (third_party/ffgl in oxbow).
 
-The plugin ABI itself. An FFGL effect, source or mixer is defined by this SDK's headers — there is no other way to be loadable by Resolume Arena and Avenue.
+The plugin ABI itself. An FFGL effect or source is defined by this SDK's headers — there is no other way to be loadable by Resolume Arena and Avenue.
 
 ### GLEW — the OpenGL Extension Wrangler Library
 
@@ -75,7 +74,7 @@ What this set out to be. No code, assets or binaries from any of these were used
 
 ### Lenticular printing
 
-Implemented from the textbook optics of a lenticular sheet: a thin cylindrical lens focusing a parallel bundle at angle t onto its focal plane at f tan t, an interleaved print in that plane, the beat between two periodic structures as the moiré of misregistration, and a viewer at finite distance seeing each column at its own angle. No particular card, lens sheet, interleaving software or photograph of one was used; the ridge highlight, the edge shading and the residual magnification are looks, not a characterisation of any sheet.
+Implemented from the textbook optics of a lenticular sheet: a thin cylindrical lens focusing a parallel bundle at angle t onto its focal plane at f tan t, an interleaved print in that plane, the beat between two periodic structures as the moire of misregistration, and a viewer at finite distance seeing each column at its own angle. No particular card, lens sheet, interleaving software or photograph of one was used; the ridge highlight, the edge shading and the residual magnification are looks, not a characterisation of any sheet.
 
 ## Getting this wrong
 
