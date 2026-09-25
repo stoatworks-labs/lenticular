@@ -15,7 +15,7 @@ namespace stoatworks::about
 {
     inline constexpr auto name = "Lenticular";
     inline constexpr auto slug = "lenticular";
-    inline constexpr auto hook = "A printed lenticular sheet that shows one layer or the other, for Resolume";
+    inline constexpr auto hook = "A lenticular card of two layers, for Resolume";
     inline constexpr auto licence = "MIT";
     inline constexpr auto guide = "https://stoatworks-labs.com/software/lenticular/guide/";
     inline constexpr auto page = "https://stoatworks-labs.com/software/lenticular/";
