@@ -48,6 +48,12 @@
 #                 would be handed one input and return FF_FAIL for ever.
 #                 The input count is a separate declaration and is asserted
 #                 separately; so is parameter 0, which Arena hides.
+#   openfx        the OpenFX bundle: CFBundleExecutable names the binary on
+#                 disk, it ad-hoc signs (the release step), it exports
+#                 OfxGetPlugin, it is universal, and a real OFX host loads it
+#                 and describes it as a Transition. ofxprobe -- the fleet's
+#                 probe host -- instantiates the Filter context only, so it
+#                 cannot RENDER a transition; the per-pixel claim is --cpu's.
 #   bench         the render cost, for the record. Not pass/fail -- there is
 #                 no threshold worth asserting on somebody else's GPU -- but
 #                 a verify run leaves a timing on the record, which is what
@@ -361,6 +367,80 @@ if [ "$(uname)" = "Darwin" ] && [ -d "$BUNDLE" ]; then
 		esac
 	else
 		printf '   skipped: oxbow not built at %s\n' "$OXBOW"
+	fi
+fi
+
+#---------------------------------------------------------------------------
+# The OpenFX bundle. cmake/InfoOFX.plist.in is copied from repo to repo, and a
+# copy with the previous plugin's name in CFBundleExecutable does not fail the
+# build: it fails at RELEASE time, in codesign, with a message that names a
+# "subcomponent" and never the plist. So the plist is checked against the
+# binary on disk and the release job's exact codesign is run, on a copy.
+#---------------------------------------------------------------------------
+OFXB="$BUILD/Lenticular.ofx.bundle"
+if [ "$(uname)" = "Darwin" ]; then
+	step "openfx"
+	if [ ! -d "$OFXB" ]; then
+		fail "no OpenFX bundle at $OFXB (configured with -DBUILD_OFX=OFF?)"
+	else
+		OFXBIN="$OFXB/Contents/MacOS/Lenticular.ofx"
+		named=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$OFXB/Contents/Info.plist" 2>/dev/null)
+		if [ -n "$named" ] && [ -f "$OFXB/Contents/MacOS/$named" ]; then
+			pass "CFBundleExecutable ($named) is on disk"
+		else
+			fail "CFBundleExecutable is '$named' but no such binary is in the bundle"
+		fi
+		ident=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$OFXB/Contents/Info.plist" 2>/dev/null)
+		if [ "$ident" = "com.stoatworks.lenticular.ofx" ]; then
+			pass "CFBundleIdentifier is $ident"
+		else
+			fail "CFBundleIdentifier is '$ident'"
+		fi
+		tmp=$(mktemp -d)
+		cp -R "$OFXB" "$tmp/"
+		if codesign --force --sign - --timestamp=none "$tmp/Lenticular.ofx.bundle" >/dev/null 2>&1; then
+			pass "ad-hoc signs (the command the release job runs)"
+		else
+			fail "the OpenFX bundle will not codesign"
+		fi
+		rm -rf "$tmp"
+		# Captured and matched, not piped into grep -q: see "registration".
+		syms=$(nm -gU "$OFXBIN" 2>/dev/null)
+		case "$syms" in
+			*_OfxGetPlugin*) pass "exports OfxGetPlugin" ;;
+			*) fail "no OfxGetPlugin -- no host will see a plugin" ;;
+		esac
+		archs=$(lipo -archs "$OFXBIN" 2>/dev/null)
+		case "$archs" in
+			*arm64*x86_64*|*x86_64*arm64*) pass "universal ($archs)" ;;
+			*) fail "not universal (got: $archs)" ;;
+		esac
+
+		# A real OFX host's loader and describe actions. The probe cannot
+		# instantiate a Transition, so it reports this plugin as unusable --
+		# for Resolume, which is what it was written to answer -- and that
+		# line is expected. What it proves is that the binary loads, its
+		# static initialisers and factory run, and it describes itself under
+		# the identity a saved project will refer to.
+		OFXPROBE="${OFXPROBE:-../resolume-ofx-bridge/build/ofxprobe}"
+		[ -x "$OFXPROBE" ] || OFXPROBE="$HOME/Projects/resolume/resolume-ofx-bridge/build/ofxprobe"
+		if [ -x "$OFXPROBE" ]; then
+			out=$("$OFXPROBE" --dir "$BUILD" 2>&1)
+			case "$out" in
+				*"com.stoatworks.lenticular"*"label      : Lenticular"*) pass "ofxprobe loads com.stoatworks.lenticular, labelled Lenticular" ;;
+				*) fail "ofxprobe does not find com.stoatworks.lenticular -- run: $OFXPROBE --dir $BUILD" ;;
+			esac
+			case "$out" in
+				*"grouping   : Stoatworks"*) pass "in the Stoatworks group" ;;
+				*) fail "not in the Stoatworks group" ;;
+			esac
+			case "$out" in
+				*"contexts   : OfxImageEffectContextTransition "*) pass "described as a Transition, and nothing else" ;;
+				*) fail "the contexts are not exactly Transition -- see: $OFXPROBE --dir $BUILD" ;;
+			esac
+		else
+			printf '   skipped: ofxprobe not built at %s\n' "$OFXPROBE"
+		fi
 	fi
 fi
 

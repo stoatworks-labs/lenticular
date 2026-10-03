@@ -41,14 +41,22 @@ endif()
 
 option(LENTICULAR_BUILD_TOOLS "Build the offline render and measurement harness" ON)
 
+# The FFGL plugin, the FFGL SDK submodule and GLEW are one dependency group, and
+# the OpenFX plugin belongs to none of it. Turning this OFF builds the OFX plugin
+# alone, with no GL loader anywhere in the configure -- which is what the Linux
+# job does, because the FFGL SDK has no Linux path and GLEW would otherwise have
+# to be installed to build something that never calls it.
+option(LENTICULAR_BUILD_FFGL "Build the FFGL plugin (needs the FFGL SDK and, off macOS, GLEW)" ON)
+
 # ---------------------------------------------------------------------------
 # The parts with no GL in them at all: the parameter conversions, the lens
 # setup, the uniforms and the CPU twin of the card shader (Card.h).
 #
-# A separate library from the FFGL core because the CPU twin is for a build
-# with no GL context, and because the harness compares the two: the plugin
-# hands its shader exactly what this library computes, so the twin is handed
-# the same floats rather than a second transcription of them.
+# A separate library from the FFGL core because three builds need it and only
+# one of them has a GL context -- the OpenFX plugin renders on the CPU and the
+# Linux job has no GL loader configured. Splitting it is what lets the OpenFX
+# build link the SAME arithmetic the FFGL build hands its shader, rather than a
+# second transcription of it.
 # ---------------------------------------------------------------------------
 add_library(lenticular_card OBJECT
     source/Controls.h
@@ -59,6 +67,8 @@ add_library(lenticular_card OBJECT
 )
 target_include_directories(lenticular_card PUBLIC source)
 set_target_properties(lenticular_card PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if(LENTICULAR_BUILD_FFGL)
 
 # ---------------------------------------------------------------------------
 # The Resolume FFGL SDK, as a git submodule pinned to b1afaf9 -- the rev the
@@ -161,6 +171,8 @@ install(TARGETS Lenticular
     LIBRARY DESTINATION "."
     BUNDLE  DESTINATION "."
 )
+# The OpenFX bundle is deliberately NOT installed here: it belongs in
+# /Library/OFX/Plugins (root-owned), not in Resolume's folder. See the README.
 
 # ---------------------------------------------------------------------------
 # The harness: the real plugin class in a real GL context, with no host.
@@ -189,4 +201,85 @@ if(LENTICULAR_BUILD_TOOLS AND APPLE)
     add_test(NAME opacity  COMMAND lntest --opacity)
     add_test(NAME mutation COMMAND lntest --mutation)
     add_test(NAME cpu      COMMAND lntest --cpu)
+endif()
+
+endif()  # LENTICULAR_BUILD_FFGL
+
+# ---------------------------------------------------------------------------
+# The OpenFX build, for Resolve, Vegas and any other host with a Transition
+# context. CPU render against the vendored OFX SDK subset under
+# external/openfx (C headers + the official C++ Support library, BSD-3).
+# lenticular_card links straight in, so the parameter conversions, the lens
+# setup and the uniforms are the same code the FFGL build hands its shader;
+# only the shader's per-pixel stage is written twice, in Card.cpp, and
+# `lntest --cpu` holds the two together.
+# ---------------------------------------------------------------------------
+option(BUILD_OFX "Build the OpenFX plugin" ON)
+
+if(BUILD_OFX)
+    set(OFX_SDK "${CMAKE_CURRENT_SOURCE_DIR}/external/openfx")
+
+    add_library(LenticularOFX MODULE
+        source/ofx/LenticularOFX.cpp
+        ${OFX_SDK}/Support/Library/ofxsCore.cpp
+        ${OFX_SDK}/Support/Library/ofxsImageEffect.cpp
+        ${OFX_SDK}/Support/Library/ofxsInteract.cpp
+        ${OFX_SDK}/Support/Library/ofxsLog.cpp
+        ${OFX_SDK}/Support/Library/ofxsMultiThread.cpp
+        ${OFX_SDK}/Support/Library/ofxsParams.cpp
+        ${OFX_SDK}/Support/Library/ofxsProperty.cpp
+        ${OFX_SDK}/Support/Library/ofxsPropertyValidation.cpp
+    )
+    # PRIVATE on an OBJECT library gives both the objects and the usage
+    # requirements. `$<TARGET_OBJECTS:lenticular_card>` would give the objects
+    # alone -- no include directories -- and the failure is platform-specific
+    # enough to cost a day.
+    target_link_libraries(LenticularOFX PRIVATE lenticular_card)
+    target_include_directories(LenticularOFX PRIVATE
+        source
+        "${OFX_SDK}/include"
+        "${OFX_SDK}/Support/include"
+    )
+    target_compile_definitions(LenticularOFX PRIVATE
+        LENTICULAR_VERSION="${PROJECT_VERSION}"
+        PLUGIN_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+        PLUGIN_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    )
+
+    # Threads, explicitly. The OFX Support library's multi-thread suite calls
+    # pthread_create, and on Rocky 8 -- glibc 2.28, the floor Resolve supports --
+    # that still lives in libpthread; libpthread was only folded into libc in
+    # glibc 2.34. Leave it out and the plugin compiles, links, passes a symbol
+    # check and a glibc-version check, and then fails at dlopen with "undefined
+    # symbol: pthread_create". macOS and Windows never show it.
+    find_package(Threads REQUIRED)
+    target_link_libraries(LenticularOFX PRIVATE Threads::Threads)
+
+    set(OFX_BUNDLE_DIR "${CMAKE_BINARY_DIR}/Lenticular.ofx.bundle")
+    set_target_properties(LenticularOFX PROPERTIES
+        PREFIX ""
+        SUFFIX ".ofx"
+        OUTPUT_NAME "Lenticular"
+        POSITION_INDEPENDENT_CODE ON
+        LIBRARY_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/MacOS"
+    )
+    if(APPLE)
+        set(OFX_BUNDLE_IDENTIFIER "com.stoatworks.lenticular.ofx")
+        configure_file(cmake/InfoOFX.plist.in
+            "${OFX_BUNDLE_DIR}/Contents/Info.plist" @ONLY)
+    elseif(WIN32)
+        set_target_properties(LenticularOFX PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/Win64"
+            RUNTIME_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/Win64"
+            LIBRARY_OUTPUT_DIRECTORY_RELEASE "${OFX_BUNDLE_DIR}/Contents/Win64"
+            RUNTIME_OUTPUT_DIRECTORY_RELEASE "${OFX_BUNDLE_DIR}/Contents/Win64"
+            # MSVC's .exp/.lib for this target; its default directory collides
+            # with the FFGL target's, which shares the output base name, and a
+            # parallel build then races on the file (LNK1104).
+            ARCHIVE_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/importlib"
+            ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${OFX_BUNDLE_DIR}/importlib")
+    else()
+        set_target_properties(LenticularOFX PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${OFX_BUNDLE_DIR}/Contents/Linux-x86-64")
+    endif()
 endif()
