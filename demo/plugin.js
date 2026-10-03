@@ -116,6 +116,7 @@ const int kFaultFlatDistance = 4;
 
 //Clamped half a texel inside the used area: GL_LINEAR at the boundary takes
 //half its weight from the texture's undrawn padding.
+//= mirrored -- Card.cpp fetch
 vec4 fetchA( vec2 p )
 {
 	if( ( Fault & kFaultFoldedMaxUV ) != 0 )
@@ -124,6 +125,7 @@ vec4 fetchA( vec2 p )
 	return texture( TextureA, q * MaxUVA );
 }
 
+//= mirrored -- Card.cpp fetch
 vec4 fetchB( vec2 p )
 {
 	if( ( Fault & kFaultFoldedMaxUV ) != 0 )
@@ -135,6 +137,7 @@ vec4 fetchB( vec2 p )
 //The print's B fraction at a point: 0 on A's strip, 1 on B's, with a linear
 //ramp BleedPeriods wide centred on each strip edge. u is the phase in its
 //period, [0, 1): B -> A at 0, A -> B at 0.5.
+//= mirrored -- Card.cpp stepUp
 float stepUp( float x )
 {
 	if( BleedPeriods <= 0.0 )
@@ -142,12 +145,14 @@ float stepUp( float x )
 	return clamp( 0.5 + x / BleedPeriods, 0.0, 1.0 );
 }
 
+//= mirrored -- Card.cpp stripB
 float stripB( float u )
 {
 	return 1.0 - stepUp( u ) + stepUp( u - 0.5 ) - stepUp( u - 1.0 );
 }
 
 //The antiderivative of stepUp, zero far to the left.
+//= mirrored -- Card.cpp rampIntegral
 float rampIntegral( float x )
 {
 	float h = 0.5 * BleedPeriods;
@@ -160,6 +165,7 @@ float rampIntegral( float x )
 
 //The integral of stripB from 0 to x >= 0: half a period of B in every whole
 //period, and the part period in closed form.
+//= mirrored -- Card.cpp integralB
 float integralB( float x )
 {
 	float n = floor( x );
@@ -172,6 +178,7 @@ float integralB( float x )
 //phase. A spot wholly on one strip's flat part is exactly 0 or 1 -- a
 //branch, not a cancellation -- so a card tilted onto one strip returns that
 //picture's texel unchanged.
+//= mirrored -- Card.cpp coverageB
 float coverageB( float phase )
 {
 	float w  = SpotPeriods;
@@ -192,6 +199,7 @@ float coverageB( float phase )
 	return ( integralB( b ) - integralB( a ) ) / w;
 }
 
+//= mirrored -- Card.cpp Shade
 void main()
 {
 	//The pixel, as integers, and its centre as a fraction of the picture.

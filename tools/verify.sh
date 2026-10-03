@@ -19,8 +19,9 @@
 #                 included), the whole card flips at the angles the lens
 #                 geometry gives, a pitch mismatch bands at the moire period
 #                 by FFT, a near viewer's flip sweeps across as D sin T,
-#                 Opacity tilts the card monotonically, and one character
-#                 of GLSL mutated
+#                 Opacity tilts the card monotonically, one character
+#                 of GLSL mutated, and the OpenFX build's CPU twin of the
+#                 shader against the GPU per pixel (--cpu)
 #   software      the same suites on Apple's software renderer, which is
 #                 what a GPU-less CI runner gets: a check calibrated on this
 #                 Mac's GPU fails here before it fails in CI
@@ -186,7 +187,7 @@ else
 fi
 
 LNTEST="$BUILD/lntest"
-SUITES="names mixer ends flip moire distance opacity mutation"
+SUITES="names mixer ends flip moire distance opacity mutation cpu"
 
 step "suites"
 for t in $SUITES; do

@@ -18,6 +18,7 @@
         lntest --distance               a near viewer: the flip sweeps across the card as D sin T
         lntest --opacity                Opacity tilts the card monotonically from -max to +max
         lntest --mutation               one character of the shipped GLSL fails a check
+        lntest --cpu                    the OpenFX build's CPU twin of the shader matches the GPU
         lntest --bench                  ms/frame at 720p through 4K
         lntest --pipe                   raw frames in, raw frames out (two inputs)
 
@@ -43,6 +44,7 @@
     them all.
 */
 
+#include "Card.h"
 #include "Controls.h"
 #include "Lens.h"
 #include "Lenticular.h"
@@ -1928,6 +1930,335 @@ int runMutation()
 }
 
 //---------------------------------------------------------------------------
+// --cpu: the CPU twin of the card shader -- card::Shade, which the OpenFX
+// build renders every pixel with -- against the real plugin's GPU render of
+// the same two inputs, per pixel, at seven fader positions and seven other
+// settings that exercise every control, at both rasters, and once with A and
+// B at two other sizes than the output. Float framebuffer against float.
+//
+// What may differ, and the bound, per setting:
+//
+//   - The GPU's texture filter. The GL lets an implementation quantise the
+//     bilinear weights; 8 bits of sub-texel precision is the D3D10-class
+//     floor, so each weight may be off by 2^-8, and that moves a fetch by at
+//     most 2^-8 times the largest step between two neighbouring texels of
+//     the inputs (measured from them). Two axes: 2 x 2^-8 x step.
+//   - The ridge's trigonometry. GLSL 4.10 specifies no precision for sin or
+//     atan at all. Taking each as good to 2^-10 absolute (D3D10 asks 0.0008
+//     of sin; Apple's software renderer is about 1e-3 here), the highlight's
+//     centre moves by ( 2^-10 + 2^-10 / 2 ) / ( 2 sin 35 deg ) of a lens, g by
+//     that over HighlightWidth, and h = Shine exp( -g^2 ) by up to
+//     Shine sqrt( 2 / e ) times g's error. Zero at Ridge Shine 0.
+//   - Everything else is float arithmetic on numbers under a few hundred,
+//     the coverage's closed form included: 2^-12 covers it with room.
+//   - Lens edges. A column whose X N_L is within 8 ULP of an integer can land
+//     in a different lens on the two sides (a GPU's division is 2.5 ULP), and
+//     a lens edge is a step in the picture. Those columns are counted and
+//     excluded, and there must be few: at these rasters, none is expected.
+//
+// The tolerance is three times that bound, for every setting.
+//
+// Negative controls, each of which must fail the same comparison: the twin a
+// fader step off the GPU (Opacity 0.47 against 0.53); the twin sampling
+// GL_NEAREST where the GPU samples GL_LINEAR (kFaultNearestTexel); and the
+// GLSL drifting from its twin by one character -- --mutation's edit, the
+// strip edge a tenth of a period off the lens axis -- which is the failure
+// this check exists for.
+//---------------------------------------------------------------------------
+std::vector< float > toFloats( const Image& bytes )
+{
+	std::vector< float > out( bytes.size() );
+	for( size_t i = 0; i < bytes.size(); ++i )
+		out[ i ] = static_cast< float >( bytes[ i ] ) / 255.0f;
+	return out;
+}
+
+/// The host values the plugin holds, read back out of it: what the twin is
+/// handed is what the GPU was handed, by construction.
+card::HostValues valuesOf( Lenticular& plugin )
+{
+	auto p = [ & ]( unsigned id ) { return plugin.GetFloatParameter( id ); };
+	card::HostValues v;
+	v.squeeze         = p( Lenticular::PT_SQUEEZE );
+	v.interleavePitch = p( Lenticular::PT_INTERLEAVE_PITCH );
+	v.bleed           = p( Lenticular::PT_BLEED );
+	v.lensPitch       = p( Lenticular::PT_LENS_PITCH );
+	v.focalLength     = p( Lenticular::PT_FOCAL_LENGTH );
+	v.focusSpot       = p( Lenticular::PT_FOCUS_SPOT );
+	v.distance        = p( Lenticular::PT_DISTANCE );
+	v.opacity         = p( Lenticular::PT_OPACITY );
+	v.angleRange      = p( Lenticular::PT_ANGLE_RANGE );
+	v.ridgeShine      = p( Lenticular::PT_RIDGE_SHINE );
+	v.lightAngle      = p( Lenticular::PT_LIGHT_ANGLE );
+	return v;
+}
+
+/// The largest step between two neighbouring texels of a picture, any
+/// channel, in 0..1.
+double largestStep( const Image& image, int width, int height )
+{
+	int worst = 0;
+	for( int y = 0; y < height; ++y )
+		for( int x = 0; x < width; ++x )
+			for( int c = 0; c < 4; ++c )
+			{
+				const int v = image[ ( static_cast< size_t >( y ) * width + x ) * 4 + static_cast< size_t >( c ) ];
+				if( x + 1 < width )
+					worst = std::max( worst, std::abs( v - image[ ( static_cast< size_t >( y ) * width + x + 1 ) * 4 + static_cast< size_t >( c ) ] ) );
+				if( y + 1 < height )
+					worst = std::max( worst, std::abs( v - image[ ( static_cast< size_t >( y + 1 ) * width + x ) * 4 + static_cast< size_t >( c ) ] ) );
+			}
+	return worst / 255.0;
+}
+
+/// Whether column x's X N_L, as the shader computes it, is within 8 ULP of
+/// a lens edge.
+bool atLensEdge( const card::Uniforms& u, int x )
+{
+	const float X  = ( static_cast< float >( x ) + 0.5f ) / static_cast< float >( u.outW );
+	const float xl = X * u.lensPerWidth;
+	const float ulp = std::nextafter( std::fabs( xl ), INFINITY ) - std::fabs( xl );
+	return std::fabs( xl - std::nearbyint( xl ) ) <= 8.0f * ulp;
+}
+
+struct TwinSetting
+{
+	const char* name;
+	std::vector< std::pair< const char*, float > > set;
+};
+
+struct TwinResult
+{
+	double worst     = 0.0;///< over every compared channel, 0..1
+	long over        = 0;  ///< pixels with a channel past the tolerance
+	long edgePixels  = 0;  ///< excluded: in a column at a lens edge
+	long pixels      = 0;
+	double step      = 0.0;///< the inputs' largest neighbouring step
+	double bound     = 0.0;///< this setting's derived bound, 0..1
+	double tol       = 0.0;///< three times it
+	int worst8       = 0;  ///< RGBA8 framebuffer against the twin rounded, /255
+	long differ8     = 0;  ///< pixels with any byte different
+};
+
+/// The bound above, for one setting: the inputs' step and the uniforms the
+/// GPU was handed.
+double twinBound( double step, const card::Uniforms& u )
+{
+	const double filter = 2.0 * std::ldexp( 1.0, -8 ) * step;
+	const double other  = std::ldexp( 1.0, -12 );
+	double ridge        = 0.0;
+	if( u.shine > 0.0f )
+	{
+		const double trig   = std::ldexp( 1.0, -10 );
+		const double centre = ( trig + 0.5 * trig ) / ( 2.0 * u.ridgeSlope );
+		ridge               = u.shine * std::sqrt( 2.0 / std::exp( 1.0 ) ) * centre / u.highlightWidth;
+	}
+	return filter + other + ridge;
+}
+
+int twinCompare( int W, int H, InputSpec aSpec, InputSpec bSpec, const TwinSetting& setting, int cpuFault, float cpuOpacity,
+                 TwinResult& r, const char* fragment = nullptr )
+{
+	r = TwinResult {};
+	const Image aImage = videoCard( aSpec.usedW, aSpec.usedH );
+	const Image bImage = graphicCard( bSpec.usedW, bSpec.usedH );
+	r.step             = std::max( largestStep( aImage, aSpec.usedW, aSpec.usedH ), largestStep( bImage, bSpec.usedW, bSpec.usedH ) );
+
+	Rig rig;
+	if( !rig.Init( W, H, aSpec, bSpec, true, kFaultNone, fragment ) )
+		return 1;
+	rig.UploadA( aImage );
+	rig.UploadB( bImage );
+	for( const auto& kv : setting.set )
+		if( !rig.Set( kv.first, kv.second ) )
+			return 1;
+	if( !rig.Render() )
+		return 1;
+	const ImageF gpu = rig.PixelsF();
+
+	//The same parameters on an RGBA8 framebuffer: what an 8-bit host gets.
+	Rig rig8;
+	if( !rig8.Init( W, H, aSpec, bSpec, false, kFaultNone, fragment ) )
+		return 1;
+	rig8.UploadA( aImage );
+	rig8.UploadB( bImage );
+	for( const auto& kv : setting.set )
+		rig8.Set( kv.first, kv.second );
+	if( !rig8.Render() )
+		return 1;
+	const Image gpu8 = rig8.Pixels();
+
+	card::HostValues values = valuesOf( rig.plugin );
+	r.bound                 = twinBound( r.step, card::UniformsFor( card::SetupFor( values ), W, H ) );
+	r.tol                   = 3.0 * r.bound;
+	const double tol        = r.tol;
+	if( cpuOpacity >= 0.0f )
+		values.opacity = cpuOpacity;
+	card::Uniforms u = card::UniformsFor( card::SetupFor( values ), W, H );
+	u.fault          = cpuFault;
+	const std::vector< float > aF = toFloats( aImage ), bF = toFloats( bImage );
+	const card::Texture aT        = card::MakeTexture( aF.data(), aSpec.usedW, aSpec.usedH );
+	const card::Texture bT        = card::MakeTexture( bF.data(), bSpec.usedW, bSpec.usedH );
+	std::vector< float > cpu( static_cast< size_t >( W ) * H * 4 );
+	card::Render( u, aT, bT, cpu.data(), 0, H );
+
+	for( int x = 0; x < W; ++x )
+	{
+		const bool edge = atLensEdge( u, x );
+		for( int y = 0; y < H; ++y )
+		{
+			const size_t at = ( static_cast< size_t >( y ) * W + static_cast< size_t >( x ) ) * 4;
+			bool pixelOver  = false;
+			bool pixelDiff8 = false;
+			for( int c = 0; c < 4; ++c )
+			{
+				const double d = std::fabs( static_cast< double >( gpu[ at + static_cast< size_t >( c ) ] ) - cpu[ at + static_cast< size_t >( c ) ] );
+				const int twin8 = toByte( cpu[ at + static_cast< size_t >( c ) ] );
+				const int d8    = std::abs( twin8 - gpu8[ at + static_cast< size_t >( c ) ] );
+				if( !edge )
+				{
+					r.worst = std::max( r.worst, d );
+					if( d > tol )
+						pixelOver = true;
+					r.worst8 = std::max( r.worst8, d8 );
+				}
+				if( d8 != 0 )
+					pixelDiff8 = true;
+			}
+			++r.pixels;
+			if( edge )
+				++r.edgePixels;
+			if( pixelOver )
+				++r.over;
+			if( pixelDiff8 )
+				++r.differ8;
+		}
+	}
+	return 0;
+}
+
+const std::vector< TwinSetting >& twinSettings()
+{
+	static const std::vector< TwinSetting > settings = {
+		{ "defaults, Opacity 0 (A)", { { "Opacity", 0.0f } } },
+		{ "defaults, Opacity 0.25", { { "Opacity", 0.25f } } },
+		{ "defaults, Opacity 0.47", { { "Opacity", 0.47f } } },
+		{ "defaults, Opacity 0.5 (square on)", { { "Opacity", 0.5f } } },
+		{ "defaults, Opacity 0.53", { { "Opacity", 0.53f } } },
+		{ "defaults, Opacity 0.75", { { "Opacity", 0.75f } } },
+		{ "defaults, Opacity 1 (B)", { { "Opacity", 1.0f } } },
+		{ "moire: 64 lenses over 57 periods, Opacity 0.4",
+		  { { "Lens Pitch", ParamForPitch( 64.0 ) }, { "Interleave Pitch", ParamForPitch( 57.0 ) }, { "Opacity", 0.4f } } },
+		{ "Squeeze off, a viewer one width away, Opacity 0.55",
+		  { { "Squeeze", 0.0f }, { "Distance", ParamForDistance( 1.0 ) }, { "Opacity", 0.55f } } },
+		{ "the ghost: half-lens spot, full bleed, Opacity 0.5",
+		  { { "Focus Spot", 1.0f }, { "Bleed", 1.0f }, { "Opacity", 0.5f } } },
+		{ "16 lenses, full shine, light at -48 deg, 45 deg range, Opacity 0.65",
+		  { { "Lens Pitch", ParamForPitch( 16.0 ) },
+		    { "Interleave Pitch", ParamForPitch( 16.0 ) },
+		    { "Ridge Shine", 1.0f },
+		    { "Light Angle", 0.1f },
+		    { "Angle Range", 1.0f },
+		    { "Opacity", 0.65f } } },
+		{ "an ideal lens: no spot, no bleed, no shine, Opacity 0.6",
+		  { { "Focus Spot", 0.0f }, { "Bleed", 0.0f }, { "Ridge Shine", 0.0f }, { "Opacity", 0.6f } } },
+		{ "F 0.5, 480 lenses over 400 periods, Opacity 0.9",
+		  { { "Focal Length", 0.0f }, { "Lens Pitch", 1.0f }, { "Interleave Pitch", ParamForPitch( 400.0 ) }, { "Opacity", 0.9f } } },
+		{ "F 6, 30 lenses over 33 periods, near viewer, Opacity 0.35",
+		  { { "Focal Length", 1.0f },
+		    { "Lens Pitch", ParamForPitch( 30.0 ) },
+		    { "Interleave Pitch", ParamForPitch( 33.0 ) },
+		    { "Distance", ParamForDistance( 2.0 ) },
+		    { "Opacity", 0.35f } } },
+	};
+	return settings;
+}
+
+int runCpu()
+{
+	std::printf( "the OpenFX build's CPU twin of the shader against the GPU, per pixel\n\n" );
+	std::printf( "  bound per setting: 2 x 2^-8 x the inputs' largest neighbouring step (the filter's weights),\n"
+	             "  + Shine sqrt( 2/e ) x the highlight's centre error from sin and atan good to 2^-10, + 2^-12;\n"
+	             "  tolerance three times it, a channel, float framebuffer against float\n\n" );
+
+	struct Sizes
+	{
+		int W, H;
+		InputSpec a, b;
+		const char* what;
+	};
+	const Sizes sizes[] = {
+		{ 640, 360, InputSpec::Exact( 640, 360 ), InputSpec::Exact( 640, 360 ), "A and B at the output's size" },
+		{ 320, 180, InputSpec::Exact( 320, 180 ), InputSpec::Exact( 320, 180 ), "A and B at the output's size" },
+		{ 640, 360, InputSpec::Exact( 400, 250 ), InputSpec::Exact( 256, 144 ), "A 400x250 and B 256x144, resampled" },
+	};
+
+	double worstAll = 0.0;
+	int worst8All   = 0;
+	long edgeAll = 0, pixelsAll = 0;
+	for( const Sizes& s : sizes )
+	{
+		std::printf( "  %dx%d, %s\n", s.W, s.H, s.what );
+		for( const TwinSetting& setting : twinSettings() )
+		{
+			TwinResult r;
+			if( twinCompare( s.W, s.H, s.a, s.b, setting, kFaultNone, -1.0f, r ) != 0 )
+				return 1;
+			worstAll  = std::max( worstAll, r.worst );
+			worst8All = std::max( worst8All, r.worst8 );
+			edgeAll += r.edgePixels;
+			pixelsAll += r.pixels;
+			Check( r.over == 0, std::string( "    " ) + setting.name
+			                        + fmt( ": worst %.2f of 255 (tolerance %.2f, bound %.2f); RGBA8: %.0f of 255", r.worst * 255.0, r.tol * 255.0,
+			                               r.bound * 255.0, r.worst8 )
+			                        + fmt( " in %.0f px, %.0f lens-edge px", r.differ8, r.edgePixels ) );
+		}
+	}
+	//Few lens-edge columns: the exclusion is for a coincidence, not a habit.
+	Check( edgeAll * 1000 <= pixelsAll, fmt( "lens-edge pixels excluded: %.0f of %.0f (at most 1 in 1000)", edgeAll, pixelsAll ) );
+	std::printf( "  worst over everything: %.3f of 255 a channel; an RGBA8 framebuffer against the twin rounded: %d of 255\n",
+	             worstAll * 255.0, worst8All );
+
+	//Negative controls, at the raster CI runs.
+	{
+		const TwinSetting at53 = { "defaults, Opacity 0.53", { { "Opacity", 0.53f } } };
+		TwinResult r;
+		const int caught = failuresOf( [ & ] {
+			twinCompare( 320, 180, InputSpec::Exact( 320, 180 ), InputSpec::Exact( 320, 180 ), at53, kFaultNone, 0.47f, r );
+			Check( r.over == 0, "a fader step off" );
+		} );
+		Negative( caught > 0, fmt( "the twin at Opacity 0.47 against the GPU at 0.53: %.0f px over tolerance, worst %.1f of 255", r.over, r.worst * 255.0 ) );
+	}
+	{
+		const TwinSetting def = { "defaults, Opacity 0.47", { { "Opacity", 0.47f } } };
+		TwinResult r;
+		const int caught = failuresOf( [ & ] {
+			twinCompare( 320, 180, InputSpec::Exact( 320, 180 ), InputSpec::Exact( 320, 180 ), def, kFaultNearestTexel, -1.0f, r );
+			Check( r.over == 0, "nearest" );
+		} );
+		Negative( caught > 0, fmt( "the twin sampling GL_NEAREST for GL_LINEAR: %.0f px over tolerance, worst %.1f of 255", r.over, r.worst * 255.0 ) );
+	}
+	{
+		std::string mutated      = kLenticularShader;
+		const std::string from   = "float base = ( k + 0.5 ) * PitchRatio;";
+		const size_t at          = mutated.find( from );
+		Check( at != std::string::npos, "the line to mutate is in the shipped shader" );
+		if( at == std::string::npos )
+			return 1;
+		mutated.replace( at, from.size(), "float base = ( k + 0.6 ) * PitchRatio;" );
+		const TwinSetting def = { "defaults, Opacity 0.47", { { "Opacity", 0.47f } } };
+		TwinResult r;
+		const int caught = failuresOf( [ & ] {
+			twinCompare( 320, 180, InputSpec::Exact( 320, 180 ), InputSpec::Exact( 320, 180 ), def, kFaultNone, -1.0f, r, mutated.c_str() );
+			Check( r.over == 0, "mutated" );
+		} );
+		Negative( caught > 0, fmt( "one character of the GLSL changed and the C++ not: %.0f px over tolerance, worst %.1f of 255", r.over,
+		                           r.worst * 255.0 ) );
+	}
+	return failures == 0 ? 0 : 1;
+}
+
+//---------------------------------------------------------------------------
 // --bench
 //---------------------------------------------------------------------------
 double benchAt( int width, int height, int frames, bool moire )
@@ -2250,6 +2581,7 @@ void usage()
 		"  --input-b NAME    the SRC generator, this layer: B (default graphic)\n"
 		"                    video | graphic | quads-a | quads-b | bars | black | white | flat\n"
 		"  --card PATH       write input B alone\n"
+		"  --twin            render --out through the OpenFX build's CPU twin (card::Shade), not the GPU\n"
 		"  --size WxH        picture size (default 1280x720)\n"
 		"  --set \"Name=V\"    set a parameter by its display name, in host units. Repeatable.\n"
 		"  --list            print every parameter, its kind, default and range, then exit\n"
@@ -2261,6 +2593,7 @@ void usage()
 		"  --distance        a near viewer: the flip sweeps across the card as D sin T\n"
 		"  --opacity         Opacity drives the tilt monotonically from -max to +max\n"
 		"  --mutation        one character of the shipped GLSL fails --flip\n"
+		"  --cpu             the OpenFX build's CPU twin of the shader matches the GPU, per pixel\n"
 		"  --bench           time ProcessOpenGL at 720p through 4K\n"
 		"  --pipe            raw RGBA Dest (A) frames on stdin, raw RGBA frames on stdout\n"
 		"  --pipe-src PATH   raw RGBA Src (B) frames for --pipe (a file or FIFO); default: --input-b, held\n"
@@ -2290,7 +2623,7 @@ int main( int argc, char** argv )
 	std::string inputB = "graphic";
 	int width = 1280, height = 720;
 	int frames = 0;
-	bool wantList = false, wantBench = false, wantPipe = false;
+	bool wantList = false, wantBench = false, wantPipe = false, wantTwin = false;
 	std::string scriptPath, srcPath;
 	int srcWidth = 0, srcHeight = 0;
 	std::string check;
@@ -2329,6 +2662,8 @@ int main( int argc, char** argv )
 			wantList = true;
 		else if( argument == "--bench" )
 			wantBench = true;
+		else if( argument == "--twin" )
+			wantTwin = true;
 		else if( argument == "--pipe" )
 			wantPipe = true;
 		else if( argument == "--pipe-src" && hasNext )
@@ -2344,7 +2679,7 @@ int main( int argc, char** argv )
 			}
 		}
 		else if( argument == "--names" || argument == "--mixer" || argument == "--ends" || argument == "--flip" || argument == "--moire"
-		         || argument == "--distance" || argument == "--opacity" || argument == "--mutation" )
+		         || argument == "--distance" || argument == "--opacity" || argument == "--mutation" || argument == "--cpu" )
 			check = argument;
 		else
 		{
@@ -2392,6 +2727,8 @@ int main( int argc, char** argv )
 		result = runOpacity();
 	else if( check == "--mutation" )
 		result = runMutation();
+	else if( check == "--cpu" )
+		result = runCpu();
 	else if( wantBench )
 		result = runBench( frames > 0 ? frames : 60 );
 	else if( wantPipe )
@@ -2402,16 +2739,35 @@ int main( int argc, char** argv )
 		Rig rig;
 		if( !rig.Init( width, height ) )
 			return 1;
-		rig.UploadA( generate( inputA, width, height ) );
-		rig.UploadB( generate( inputB, width, height ) );
+		const Image aImage = generate( inputA, width, height );
+		const Image bImage = generate( inputB, width, height );
+		rig.UploadA( aImage );
+		rig.UploadB( bImage );
 		if( !applySettings( rig, settings ) )
 			return 2;
-		if( !rig.Render() )
+		Image picture;
+		if( wantTwin )
 		{
-			std::fprintf( stderr, "ProcessOpenGL failed\n" );
-			return 1;
+			//The OpenFX build's renderer, card::Shade, on the same inputs and
+			//the same parameters, instead of the GPU.
+			const card::Uniforms u        = card::UniformsFor( card::SetupFor( valuesOf( rig.plugin ) ), width, height );
+			const std::vector< float > aF = toFloats( aImage ), bF = toFloats( bImage );
+			std::vector< float > cpu( static_cast< size_t >( width ) * height * 4 );
+			card::Render( u, card::MakeTexture( aF.data(), width, height ), card::MakeTexture( bF.data(), width, height ), cpu.data(), 0, height );
+			picture.resize( cpu.size() );
+			for( size_t i = 0; i < cpu.size(); ++i )
+				picture[ i ] = toByte( cpu[ i ] );
 		}
-		if( !writePng( outPath, width, height, rig.Pixels() ) )
+		else
+		{
+			if( !rig.Render() )
+			{
+				std::fprintf( stderr, "ProcessOpenGL failed\n" );
+				return 1;
+			}
+			picture = rig.Pixels();
+		}
+		if( !writePng( outPath, width, height, picture ) )
 		{
 			std::fprintf( stderr, "could not write %s\n", outPath.c_str() );
 			return 1;

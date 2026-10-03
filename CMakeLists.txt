@@ -42,6 +42,25 @@ endif()
 option(LENTICULAR_BUILD_TOOLS "Build the offline render and measurement harness" ON)
 
 # ---------------------------------------------------------------------------
+# The parts with no GL in them at all: the parameter conversions, the lens
+# setup, the uniforms and the CPU twin of the card shader (Card.h).
+#
+# A separate library from the FFGL core because the CPU twin is for a build
+# with no GL context, and because the harness compares the two: the plugin
+# hands its shader exactly what this library computes, so the twin is handed
+# the same floats rather than a second transcription of them.
+# ---------------------------------------------------------------------------
+add_library(lenticular_card OBJECT
+    source/Controls.h
+    source/Controls.cpp
+    source/Lens.h
+    source/Card.h
+    source/Card.cpp
+)
+target_include_directories(lenticular_card PUBLIC source)
+set_target_properties(lenticular_card PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# ---------------------------------------------------------------------------
 # The Resolume FFGL SDK, as a git submodule pinned to b1afaf9 -- the rev the
 # rest of the fleet pins.
 # ---------------------------------------------------------------------------
@@ -69,9 +88,6 @@ add_library(lenticular_core OBJECT
     source/StoatworksAboutParams.h
     source/Diag.h
     source/Diag.cpp
-    source/Controls.h
-    source/Controls.cpp
-    source/Lens.h
     source/Shaders.h
     source/Shaders.cpp
     source/Lenticular.h
@@ -79,7 +95,7 @@ add_library(lenticular_core OBJECT
 )
 
 target_include_directories(lenticular_core PUBLIC source)
-target_link_libraries(lenticular_core PUBLIC ffgl::sdk)
+target_link_libraries(lenticular_core PUBLIC ffgl::sdk lenticular_card)
 target_compile_definitions(lenticular_core PUBLIC LENTICULAR_VERSION="${PROJECT_VERSION}")
 set_target_properties(lenticular_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -97,7 +113,12 @@ endif()
 # ---------------------------------------------------------------------------
 function(lenticular_add_plugin target entry bundle_name identifier)
     add_library(${target} MODULE ${entry})
-    target_link_libraries(${target} PRIVATE lenticular_core)
+    # lenticular_card is named again here, and on lntest, because an OBJECT
+    # library's objects do NOT travel transitively through a second OBJECT
+    # library: lenticular_core linking it gives this target the include path
+    # and nothing to link, and the failure is a pile of undefined symbols at
+    # the very last step of an otherwise clean build.
+    target_link_libraries(${target} PRIVATE lenticular_core lenticular_card)
 
     if(APPLE)
         set_target_properties(${target} PROPERTIES
@@ -154,7 +175,7 @@ if(LENTICULAR_BUILD_TOOLS AND APPLE)
     add_executable(lntest tools/lntest/main.cpp)
     # zlib ships with the OS, which is why the PNG writer is fifty lines
     # rather than a vendored dependency.
-    target_link_libraries(lntest PRIVATE lenticular_core z
+    target_link_libraries(lntest PRIVATE lenticular_core lenticular_card z
         "-framework OpenGL"
         "-framework AppKit"
     )
@@ -167,4 +188,5 @@ if(LENTICULAR_BUILD_TOOLS AND APPLE)
     add_test(NAME distance COMMAND lntest --distance)
     add_test(NAME opacity  COMMAND lntest --opacity)
     add_test(NAME mutation COMMAND lntest --mutation)
+    add_test(NAME cpu      COMMAND lntest --cpu)
 endif()

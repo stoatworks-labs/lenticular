@@ -24,6 +24,12 @@
     lesson). Rounding an interpolated coordinate that is half a pixel from
     either integer to an integer is exact on any conforming rasteriser for
     any width under 50,000 pixels.
+
+    **The card shader has a C++ twin**, `card::Shade` in Card.cpp, which the
+    OpenFX build renders with. Every function of it marked `//= mirrored` in
+    the GLSL has a line-for-line transcription there under the same name.
+    Change one, change both, and run `lntest --cpu`, which compares the two
+    per pixel and fails when they drift.
 */
 
 namespace lenticular
@@ -42,6 +48,7 @@ enum Fault : int
 	kFaultFlatDistance = 1 << 2,///< the viewer at infinity whatever Distance says -- --distance
 	kFaultPitchLocked  = 1 << 3,///< the lens pitch forced to the print's -- --moire
 	kFaultTiltReversed = 1 << 4,///< Opacity tilts the card the other way -- --opacity
+	kFaultNearestTexel = 1 << 5,///< CPU twin only (Card.cpp): GL_NEAREST for GL_LINEAR -- --cpu
 };
 
 } // namespace lenticular

@@ -1,5 +1,6 @@
 #include "Lenticular.h"
 
+#include "Card.h"
 #include "Controls.h"
 #include "Diag.h"
 #include "Shaders.h"
@@ -65,27 +66,31 @@ Lenticular::Lenticular()
 
 	//---------------------------------------------------------------------
 	// Defaults. SetParamInfof reads each one back out of GetFloatParameter,
-	// so these assignments are what the host is told the defaults are.
+	// so these assignments are what the host is told the defaults are. They
+	// are card::HostValues' member initialisers, which the OpenFX build
+	// declares its defaults from too.
 	//---------------------------------------------------------------------
+	const card::HostValues defaults;
+
 	//Index 0, which Arena hides: on, as a real interleave is, for ever.
-	params[ PT_SQUEEZE ]          = 1.0f;
-	params[ PT_INTERLEAVE_PITCH ] = ParamForPitch( kPitchDefault );
-	params[ PT_BLEED ]            = ParamForBleed( 0.1 );
+	params[ PT_SQUEEZE ]          = defaults.squeeze;
+	params[ PT_INTERLEAVE_PITCH ] = defaults.interleavePitch;
+	params[ PT_BLEED ]            = defaults.bleed;
 
 	//The same slider position as the print's: matched, no moire, until the
 	//operator detunes one.
-	params[ PT_LENS_PITCH ]   = ParamForPitch( kPitchDefault );
-	params[ PT_FOCAL_LENGTH ] = ParamForFocal( kFocalDefault );
-	params[ PT_FOCUS_SPOT ]   = ParamForSpot( 0.1 );
-	params[ PT_DISTANCE ]     = ParamForDistance( 5.0 );
+	params[ PT_LENS_PITCH ]   = defaults.lensPitch;
+	params[ PT_FOCAL_LENGTH ] = defaults.focalLength;
+	params[ PT_FOCUS_SPOT ]   = defaults.focusSpot;
+	params[ PT_DISTANCE ]     = defaults.distance;
 
 	//Tilted to B: a mixer dropped on a layer at full opacity shows this
 	//layer. In Resolume the layer's opacity fader overrides it from the
 	//first frame.
-	params[ PT_OPACITY ]     = 1.0f;
-	params[ PT_ANGLE_RANGE ] = static_cast< float >( kAngleRangeDefaultDeg / kAngleRangeMaxDeg );
-	params[ PT_RIDGE_SHINE ] = 0.3f;
-	params[ PT_LIGHT_ANGLE ] = static_cast< float >( 0.5 + 0.5 * kLightDefaultDeg / kLightMaxDeg );
+	params[ PT_OPACITY ]     = defaults.opacity;
+	params[ PT_ANGLE_RANGE ] = defaults.angleRange;
+	params[ PT_RIDGE_SHINE ] = defaults.ridgeShine;
+	params[ PT_LIGHT_ANGLE ] = defaults.lightAngle;
 
 	//---------------------------------------------------------------------
 	// Declaration. Every ranged parameter is a plain 0..1 float, with the
@@ -232,30 +237,31 @@ FFResult Lenticular::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	}
 
 	//-----------------------------------------------------------------
-	// The card, as numbers. In double here; the shader gets floats.
+	// The card, as numbers: in double in the setup, then the floats the
+	// shader gets. Both in Card.cpp, which the OpenFX build's CPU twin of
+	// this shader is handed too -- the same floats, not a transcription.
 	//-----------------------------------------------------------------
-	lens::Setup s;
-	s.squeeze       = params[ PT_SQUEEZE ] > 0.5f;
-	s.printPerWidth = PitchFromParam( params[ PT_INTERLEAVE_PITCH ] );
-	s.lensPerWidth  = ( fault & kFaultPitchLocked ) ? s.printPerWidth : PitchFromParam( params[ PT_LENS_PITCH ] );
-	//Exactly 1.0 when the two sliders agree: the same float through the same
-	//pow is the same double.
-	s.ratio         = s.printPerWidth / s.lensPerWidth;
-	s.focal         = FocalFromParam( params[ PT_FOCAL_LENGTH ] );
-	s.spotLens      = SpotFromParam( params[ PT_FOCUS_SPOT ] );
-	s.spotPeriods   = std::min( s.spotLens * s.ratio, lens::kSpotPeriodsMax );
-	s.bleedPeriods  = 0.5 * BleedFromParam( params[ PT_BLEED ] );//a strip is half a period
-	s.invDistance   = InvDistanceFromParam( params[ PT_DISTANCE ] );
-	s.tilt          = TiltFromParams( params[ PT_OPACITY ], params[ PT_ANGLE_RANGE ] );
+	card::HostValues v;
+	v.squeeze         = params[ PT_SQUEEZE ];
+	v.interleavePitch = params[ PT_INTERLEAVE_PITCH ];
+	v.bleed           = params[ PT_BLEED ];
+	//The fault forces the lens's slider to the print's: the same float through
+	//the same mapping, so the same pitch bit for bit.
+	v.lensPitch   = ( fault & kFaultPitchLocked ) ? params[ PT_INTERLEAVE_PITCH ] : params[ PT_LENS_PITCH ];
+	v.focalLength = params[ PT_FOCAL_LENGTH ];
+	v.focusSpot   = params[ PT_FOCUS_SPOT ];
+	v.distance    = params[ PT_DISTANCE ];
+	v.opacity     = params[ PT_OPACITY ];
+	v.angleRange  = params[ PT_ANGLE_RANGE ];
+	v.ridgeShine  = params[ PT_RIDGE_SHINE ];
+	v.lightAngle  = params[ PT_LIGHT_ANGLE ];
+
+	lens::Setup s = card::SetupFor( v );
 	if( fault & kFaultTiltReversed )
 		s.tilt = -s.tilt;
-	s.shine   = std::clamp( static_cast< double >( params[ PT_RIDGE_SHINE ] ), 0.0, 1.0 );
-	s.light   = LightFromParam( params[ PT_LIGHT_ANGLE ] );
-	s.distort = lens::kDistortMax * s.shine;
 	lastSetup = s;
 
-	const double degree         = kPi / 180.0;
-	const double highlightWidth = std::max( lens::kHighlightWidth, lens::kHighlightMinPx * s.lensPerWidth / outW );
+	const card::Uniforms u = card::UniformsFor( s, outW, outH );
 
 	//-----------------------------------------------------------------
 	// Bind both inputs. The declaration ORDER matters: every
@@ -281,24 +287,24 @@ FFResult Lenticular::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	shader.Set( "HalfTexelB", 0.5f / static_cast< float >( b.Width ), 0.5f / static_cast< float >( b.Height ) );
 	glUniform2i( shader.FindUniform( "OutSize" ), outW, outH );
 
-	shader.Set( "LensPerWidth", static_cast< float >( s.lensPerWidth ) );
-	shader.Set( "PrintPerWidth", static_cast< float >( s.printPerWidth ) );
-	shader.Set( "PitchRatio", static_cast< float >( s.ratio ) );
-	shader.Set( "Focal", static_cast< float >( s.focal ) );
-	shader.Set( "SpotPeriods", static_cast< float >( s.spotPeriods ) );
-	shader.Set( "BleedPeriods", static_cast< float >( s.bleedPeriods ) );
-	shader.Set( "Squeeze", s.squeeze ? 1 : 0 );
+	shader.Set( "LensPerWidth", u.lensPerWidth );
+	shader.Set( "PrintPerWidth", u.printPerWidth );
+	shader.Set( "PitchRatio", u.pitchRatio );
+	shader.Set( "Focal", u.focal );
+	shader.Set( "SpotPeriods", u.spotPeriods );
+	shader.Set( "BleedPeriods", u.bleedPeriods );
+	shader.Set( "Squeeze", u.squeeze );
 
-	shader.Set( "SinTilt", static_cast< float >( std::sin( s.tilt ) ) );
-	shader.Set( "CosTilt", static_cast< float >( std::cos( s.tilt ) ) );
-	shader.Set( "InvDistance", static_cast< float >( ( fault & kFaultFlatDistance ) ? 0.0 : s.invDistance ) );
+	shader.Set( "SinTilt", u.sinTilt );
+	shader.Set( "CosTilt", u.cosTilt );
+	shader.Set( "InvDistance", ( fault & kFaultFlatDistance ) ? 0.0f : u.invDistance );
 
-	shader.Set( "Shine", static_cast< float >( s.shine ) );
-	shader.Set( "LightAngle", static_cast< float >( s.light ) );
-	shader.Set( "Distort", static_cast< float >( s.distort ) );
-	shader.Set( "RidgeSlope", static_cast< float >( std::sin( lens::kRidgeEdgeSlopeDeg * degree ) ) );
-	shader.Set( "HighlightWidth", static_cast< float >( highlightWidth ) );
-	shader.Set( "EdgeShade", static_cast< float >( lens::kEdgeShade ) );
+	shader.Set( "Shine", u.shine );
+	shader.Set( "LightAngle", u.lightAngle );
+	shader.Set( "Distort", u.distort );
+	shader.Set( "RidgeSlope", u.ridgeSlope );
+	shader.Set( "HighlightWidth", u.highlightWidth );
+	shader.Set( "EdgeShade", u.edgeShade );
 
 	shader.Set( "Fault", fault );
 
