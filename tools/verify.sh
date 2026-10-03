@@ -438,6 +438,100 @@ if [ "$(uname)" = "Darwin" ]; then
 				*"contexts   : OfxImageEffectContextTransition "*) pass "described as a Transition, and nothing else" ;;
 				*) fail "the contexts are not exactly Transition -- see: $OFXPROBE --dir $BUILD" ;;
 			esac
+
+			# And a RENDER through the host, when the probe can host a
+			# Transition (the test host's --context; the bridge's
+			# origin/main probe cannot). The host's own SourceFrom,
+			# SourceTo and Transition marshalling, against the FFGL
+			# plugin's GPU render of the same pictures (lntest --pipe):
+			# the comparison --cpu makes, with a real host in the middle.
+			# Opaque cards, so the 8-bit RGB the host's PPM carries is the
+			# whole picture. Tolerance 4 codes: --cpu's derived bound at
+			# these settings (the filter's 8-bit weights on a full-scale
+			# step, 2.0 codes, the ridge at Shine 0.3, 1.4, and float)
+			# rounded up to whole codes. The control -- the host at 0.47
+			# against the GPU at 0.53 -- must miss it.
+			help=$("$OFXPROBE" --help 2>&1)
+			case "$help" in
+				*"--context"*)
+					if python3 - "$OFXPROBE" "$BUILD" "$LNTEST" >"$LOGS/ofxrender.txt" 2>&1 <<'OFXRENDER_PY'
+import os, subprocess, sys, tempfile
+probe, build, lntest = sys.argv[1:4]
+W, H = 320, 180
+BARS = [(255, 255, 255), (255, 255, 0), (0, 255, 255), (0, 255, 0), (255, 0, 255), (255, 0, 0), (0, 0, 255), (40, 40, 40)]
+def card(kind):
+	out = bytearray()
+	for y in range(H):
+		for x in range(W):
+			u, v = (x + 0.5) / W, (y + 0.5) / H
+			if kind == "a":
+				c = BARS[min(7, int(u * 8))]
+				if v >= 0.75 and u < 0.5:
+					k = ((x + y) & 1) * 255
+					c = (k, 255 - k, k)
+			else:
+				c = (240, 140, 40) if int((u * 1.6 + v) * 8) & 1 else (245, 195, 105)
+				if u < 0.3 and 0.15 < v < 0.85:
+					c = (35, 30, 55)
+			out += bytes(c)
+	return bytes(out)
+tmp = tempfile.mkdtemp()
+cards = {}
+for k in "ab":
+	rgb = card(k)
+	cards[k] = rgb
+	open(os.path.join(tmp, k + ".ppm"), "wb").write(b"P6\n%d %d\n255\n" % (W, H) + rgb)
+	rgba = bytearray()
+	for i in range(0, len(rgb), 3):
+		rgba += rgb[i:i + 3] + b"\xff"
+	open(os.path.join(tmp, k + ".rgba"), "wb").write(bytes(rgba))
+def host(t, sets):
+	out = os.path.join(tmp, "host.ppm")
+	cmd = [probe, "--no-system-dirs", "--dir", build, "--render", "com.stoatworks.lenticular", "--context", "transition",
+	       "--from", os.path.join(tmp, "a.ppm"), "--to", os.path.join(tmp, "b.ppm"), "--transition", str(t), "--out-only", out]
+	for s in sets:
+		cmd += ["--set", s]
+	r = subprocess.run(cmd, capture_output=True, text=True)
+	# The instance must come from THIS build, not an installed copy.
+	where = [l.split("instance from ", 1)[1].rsplit(" (", 1)[0] for l in r.stdout.splitlines() if "instance from " in l]
+	if r.returncode != 0 or not where or os.path.realpath(os.path.dirname(where[0])) != os.path.realpath(build):
+		print(r.stdout, r.stderr)
+		sys.exit(1)
+	data = open(out, "rb").read()
+	return data[data.index(b"255\n") + 4:]
+def gpu(t, sets):
+	cmd = [lntest, "--pipe", "--size", "%dx%d" % (W, H), "--pipe-src", os.path.join(tmp, "b.rgba"), "--set", "Opacity=%s" % t]
+	for s in sets:
+		cmd += ["--set", s]
+	r = subprocess.run(cmd, stdin=open(os.path.join(tmp, "a.rgba"), "rb"), capture_output=True)
+	return bytes(r.stdout[i] for i in range(len(r.stdout)) if i % 4 != 3)
+def diff(a, b):
+	worst = max(abs(x - y) for x, y in zip(a, b))
+	px = sum(1 for i in range(0, len(a), 3) if a[i:i + 3] != b[i:i + 3])
+	return worst, px
+TOL = 4
+bad = 0
+cases = [(0, [], []), (0.47, [], []), (1, [], []),
+         (0.4, ["lensPitch=0.6", "interleavePitch=0.58"], ["Lens Pitch=0.6", "Interleave Pitch=0.58"]),
+         (0.55, ["squeeze=0", "distance=0.5", "ridgeShine=0"], ["Squeeze=0", "Distance=0.5", "Ridge Shine=0"])]
+for t, ofx, ffgl in cases:
+	w, px = diff(host(t, ofx), gpu(t, ffgl))
+	print("Transition %-4s %-40s worst %d of 255, %d of %d px differ" % (t, " ".join(ofx) or "defaults", w, px, W * H))
+	bad += w > TOL
+w, px = diff(host(0.47, []), gpu(0.53, []))
+print("control: the host at 0.47 against the GPU at 0.53: worst %d of 255, %d px differ" % (w, px))
+bad += w <= TOL
+sys.exit(1 if bad else 0)
+OFXRENDER_PY
+					then
+						pass "renders as a Transition in a real OFX host, within 4 codes of the GPU ($( grep -c '^Transition' "$LOGS/ofxrender.txt" ) settings, control rejected)"
+					else
+						sed 's/^/   /' "$LOGS/ofxrender.txt"
+						fail "the OpenFX transition rendered through $OFXPROBE disagrees with the GPU"
+					fi
+					;;
+				*) printf '   skipped: this ofxprobe cannot host a Transition (no --context); OFXPROBE=<a probe that can> to render one\n' ;;
+			esac
 		else
 			printf '   skipped: ofxprobe not built at %s\n' "$OFXPROBE"
 		fi

@@ -1939,12 +1939,12 @@ int runMutation()
 // What may differ, and the bound, per setting:
 //
 //   - The GPU's texture filter. The GL lets an implementation quantise the
-//     bilinear weights; 8 bits of sub-texel precision is the D3D10-class
-//     floor, so each weight may be off by 2^-8, and that moves a fetch by at
+//     bilinear weights; 8 bits of sub-texel precision is Direct3D 11's figure
+//     (D3D11_SUBTEXEL_FRACTIONAL_BIT_COUNT), so each weight may be off by 2^-8, and that moves a fetch by at
 //     most 2^-8 times the largest step between two neighbouring texels of
 //     the inputs (measured from them). Two axes: 2 x 2^-8 x step.
 //   - The ridge's trigonometry. GLSL 4.10 specifies no precision for sin or
-//     atan at all. Taking each as good to 2^-10 absolute (D3D10 asks 0.0008
+//     atan at all. Taking each as good to 2^-10 absolute (Direct3D asks 0.0008
 //     of sin; Apple's software renderer is about 1e-3 here), the highlight's
 //     centre moves by ( 2^-10 + 2^-10 / 2 ) / ( 2 sin 35 deg ) of a lens, g by
 //     that over HighlightWidth, and h = Shine exp( -g^2 ) by up to
