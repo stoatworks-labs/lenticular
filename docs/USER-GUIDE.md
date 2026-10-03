@@ -120,10 +120,15 @@ group, and does the same thing — the OpenFX build uses the plugin's own parame
 arithmetic and a line-for-line copy of its shader. The differences:
 
 - **There is no Opacity control.** The transition's progress is the tilt.
-- **The first and last frames are the card, not the plain clips.** The lens has no
-  end stops, so the transition opens with a cut from the plain outgoing clip to the
-  card and closes with a cut from the card to the plain incoming clip. That is the
-  effect as it is, and the same is true at the end of a Resolume transition.
+- **Two extra controls, Ends and End Length**, under **Ends**. The lens itself has no
+  end stops: tilted all the way, the card still shows the outgoing clip *through the
+  lens*, stepped and ridged. So by default (**Ends = Fade**) the transition starts on
+  exactly the outgoing clip and finishes on exactly the incoming one: over the first
+  **End Length** of the transition (0.15, so the first 15%, by default; up to 0.5)
+  the card fades in from the plain outgoing clip, and over the last it fades out to
+  the plain incoming one, smoothly, while the card keeps tilting. **Ends = Cut**
+  shows the card from the first frame to the last, cutting to it and away from it —
+  exactly what Resolume does.
 - **Squeeze is shown.** Resolume hides it; an OpenFX host shows every control.
 - **Only hosts with OpenFX transitions list it.** It is not offered as a clip effect
   anywhere, and Nuke, which has no OpenFX transitions, does not show it at all.
@@ -292,7 +297,8 @@ the lens on the transition's last frame, and then Resolume shows it plain. In Ar
 already showing the new clip, stepped and ridged, and the plain clip replaced it in
 one frame. It is the lens having no end stops, not a fault. To avoid it, use SW
 Lenticular as the layer's Blend Mode and move the layer fader instead, or keep a
-lenticular look on the new clip afterwards.
+lenticular look on the new clip afterwards. (The OpenFX transition fades the card in
+and out at its ends by default; its **Ends = Cut** is this behaviour.)
 
 **The mixer does nothing at all.** A shader that fails to compile looks exactly like
 that. The plugin writes a small log:

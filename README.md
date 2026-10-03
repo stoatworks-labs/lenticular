@@ -187,11 +187,21 @@ What differs from the FFGL build, and why:
   two-input node with a tilt slider of its own) that would, in Resolve, also
   appear among the clip effects. So a host with no Transition context — Nuke
   among them — does not list this build at all.
-- **The ends pop**, as the end of a Resolume transition does. The lens has no end stops:
-  Transition 0 is the card tilted to A *through the lens* — stepped at the lens
-  pitch, ridged — not the plain outgoing clip, so the transition opens with a
-  cut to the card and closes with a cut from it. The plugin's description in
-  the host says so.
+- **Clean ends: two controls of its own, Ends and End Length** (group Ends,
+  after everything the Resolume build has). The lens has no end stops — the
+  card at Transition 0 is the outgoing clip *through the lens*, stepped and
+  ridged — so a transition that showed the card from its first frame to its
+  last would cut to it and away from it, which on a timeline reads as a
+  glitch. **Ends = Fade**, the default, starts on exactly SourceFrom and
+  finishes on exactly SourceTo: over the first **End Length** of the
+  transition (0 to 0.5 of it, 0.15 by default) the card fades in from the
+  plain outgoing clip, and over the last it fades out to the plain incoming
+  one — a smoothstep crossfade, so there is no kink, with the card's own tilt
+  running throughout. At exactly 0 and 1 the plugin tells the host it is the
+  clip (`isIdentity`) and, if asked to render anyway, copies the clip's
+  pixels, so the ends are byte-identical to the clips. **Ends = Cut** is the
+  card from the first frame to the last: the Resolume build's behaviour, and
+  this build's output before the ends existed, bit for bit.
 - **Squeeze is reachable.** Arena hides a mixer's first parameter, so in
   Resolume Squeeze is always on; an OpenFX host shows every parameter.
 - **Inputs of another size are stretched to the output**, each by its own
@@ -288,8 +298,9 @@ stated, on the GPU and on Apple's software renderer:
 | Render cost | **0.021 ms/frame at 720p, 0.035 at 1080p, 0.10 at 4K** (0.6% of a 60 fps frame), worst of three runs on a shared machine |
 | OpenFX: the CPU twin against the GPU (`--cpu`, 2026-10-03) | 14 settings — seven fader positions and seven others between them exercising every control (moiré, Squeeze off with a near viewer, the ghost, full shine on 16 lenses, an ideal lens, F 0.5 on 480 lenses, F 6 detuned) — at 640×360 and 320×180 with both inputs at the output's size, and at 640×360 with A 400×250 and B 256×144: float framebuffer against float, worst **0.65 of 255** a channel on the GPU, **3.1 of 255** on the software renderer (full shine: its sin and atan); an RGBA8 framebuffer against the twin rounded differs by at most **1 of 255** (4 on the software renderer); no pixel needed the lens-edge exclusion. Each tolerance is three times a bound derived per setting (the filter's 8-bit weights × the inputs' largest neighbouring step, the ridge's trigonometry at 2^-10, 2^-12 of float). Negative controls: a fader step off (**74 of 255**), GL_NEAREST for GL_LINEAR (**37 of 255**), and --mutation's one-character GLSL edit with the C++ left alone (**211 of 255**) all fail |
 | OpenFX bundle | universal (`x86_64 arm64`), exports `OfxGetPlugin`, ad-hoc signs; `ofxprobe` loads it and reads **com.stoatworks.lenticular**, label Lenticular, group Stoatworks, contexts **Transition** only |
-| OpenFX in a host (2026-10-03) | a test CPU host built from the bridge's `ofxprobe` with a Transition context (`--context transition`), driving SourceFrom, SourceTo and Transition, against the FFGL plugin's GPU render of the same premultiplied bytes (`lntest --pipe`), 640×360, inputs with alpha 0, 51 and 255: Transition 0, 0.25, 0.47, 0.5, 0.75 and 1 at the defaults, moiré, Squeeze off with a near viewer, the ghost, full shine on 16 lenses — worst **1 of 255** in every one, no pixel off by more; float buffers the same. The host at 0.47 against the GPU at 0.53 differs by **124 of 255**, and the bundle with SourceFrom and SourceTo swapped by **255**. The host's Transition keyed 0 → 1 over 24 frames and read at frame 12 renders the same hash as a constant 0.5, and frame 12 after frames 0..11 in one instance is byte-identical to frame 12 alone. The CI-built universal bundle renders byte-identically to the local one. `tools/verify.sh` runs a five-setting version of this when its `OFXPROBE` can host a Transition |
-| OpenFX CPU cost | **7.1–8.2 ms a 1080p frame** (first frame 10.3) in that host, which gives a plugin 8 threads of an M4 Max; **40 ms** on one thread, timed outside a host |
+| OpenFX in a host (2026-10-03) | a test CPU host built from the bridge's `ofxprobe` with a Transition context (`--context transition`), driving SourceFrom, SourceTo and Transition, against the FFGL plugin's GPU render of the same premultiplied bytes (`lntest --pipe`), 640×360, inputs with alpha 0, 51 and 255. **Ends = Cut**: Transition 0, 0.25, 0.47, 0.5, 0.75 and 1, moiré, Squeeze off with a near viewer, the ghost, full shine on 16 lenses — worst **1 of 255** in every one, no pixel off by more, and every one **byte-identical** to the bundle from before the ends existed; float buffers the same. The host at 0.47 against the GPU at 0.53 differs by **124 of 255**, and the bundle with SourceFrom and SourceTo swapped by **255**. **Ends = Fade** (the default): Transition 0 is **byte-identical to SourceFrom** and 1 to **SourceTo**, rendered and through `isIdentity`, 8-bit and float; mid-ramp (0.03, 0.06, 0.1, 0.9, 0.95, 0.985) the picture is (1 − s) plain + s card within **1 of 255**; at 0.15, 0.5 and 0.85 it is the Cut render's bytes. The host's Transition keyed 0 → 1 over 24 frames and read at frame 12 renders the same hash as a constant 0.5, and frame 12 after frames 0..11 in one instance is byte-identical to frame 12 alone. `tools/verify.sh` runs a version of all this — five Cut settings against the GPU with the control, Fade's ends, two mid-ramp points — when its `OFXPROBE` can host a Transition, and the bundle from before the ends fails it |
+| OpenFX ends, host-free (`--fade`) | the card's strength is exactly 1 under Cut at 1001 Transition values; under Fade exactly 0 at 0 and 1, exactly 1 at 1001 values from 0.15 to 0.85, monotone over both ramps, and a step of 1e-3 from the end of a ramp moves it 1.3e-4 (a linear ramp would move 6.7e-3); End Length 0 and 0.5 behave; an input the output's size comes back from the plain path bit for bit, and every 8-bit code survives the float round trip |
+| OpenFX CPU cost | **7.1–8.4 ms a 1080p frame** over two 21-frame runs (the first rendered frame 10.3–10.5) in that host, which gives a plugin 8 threads of an M4 Max; under Fade the frames at exactly 0 and 1 are a copy, **0.2 ms**, and the ramp frames cost what the card does; **40 ms** on one thread, timed outside a host |
 
 Run `tools/verify.sh` before believing any of it.
 

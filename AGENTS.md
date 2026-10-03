@@ -132,6 +132,7 @@ least three times it.
 | `--opacity` | **1e-5 rad**; derived bound **6.0e-7** | m to 8 ULP / w, the tilt from it to w × that / F, plus 2 ULP of the tilt's sine and cosine. The inversion m → t is the box spot's linear ramp, valid because F tan( max ) = 0.2 is inside the ramp's ±0.225. Measured worst 5.5e-8 (GPU), 4.0e-8 (software). |
 | `--mutation` | **fails** | See below. |
 | `--cpu` | **three times a bound derived per setting**: 6.2 to 20.1 of 255 a channel here; bounds 2.05 to 6.71 | The OpenFX build's CPU twin against the GPU, float framebuffer against float, every pixel, 14 settings × 3 raster/input-size cases. Three terms. (1) The GPU's bilinear weights may be quantised — 8 bits of sub-texel precision is Direct3D 11's figure (`D3D11_SUBTEXEL_FRACTIONAL_BIT_COUNT`) — so each axis's weight may be off by 2^-8, moving a fetch by that times the largest step between neighbouring texels of the inputs (measured from them, ≤ 1): 2 × 2^-8 × step. (2) GLSL 4.10 specifies no precision for `sin` or `atan`; taking each as good to 2^-10 absolute (Direct3D specifies its sincos to 0.0008), the highlight's centre moves by 1.5 × 2^-10 / ( 2 sin 35° ) of a lens, g by that over HighlightWidth, and h = Shine exp( −g² ) by Shine √(2/e) times g's error — zero at Ridge Shine 0, 4.7 of 255 at Shine 1 on 16 lenses. (3) 2^-12 for the rest of the float arithmetic. A column whose X N_L is within 8 ULP of a lens edge is excluded and counted (a GPU division is 2.5 ULP and a lens edge is a step); none occurred in 7.3 M pixels, and at most 1 in 1000 is allowed. Measured worst **0.65 of 255** (GPU), **3.1 of 255** (software, at full shine — its trigonometry). RGBA8 framebuffer against the twin rounded: **1 of 255** (GPU), 4 (software). |
+| `--fade` | exact, and **3 (d / L)²** | The OpenFX build's ends, no GL. Exact claims are exact: strength 1 under Cut, 0 at Transition 0 and 1 under Fade, 1 between the ramps, the plain picture of an input the output's size bit for bit, every 8-bit code through float and back. The kink: smoothstep moves by 3x² − 2x³ ≤ 3x² from the end of a ramp, so a step d moves it at most 3 (d / L)² (1.3e-4 at d = 1e-3, L = 0.15); a linear ramp, the negative control, moves d / L = 6.7e-3. |
 | `--bench` | not asserted | No threshold is worth asserting on somebody else's GPU, on a machine shared with seven other builds. |
 
 **Negative controls live in the shipping class.** `Lenticular::SetFaultForTest`
@@ -360,9 +361,34 @@ what a host that renders frames out of order, alone and concurrently needs. The
 one thing that does not carry over is Squeeze being hidden: Arena hides a
 mixer's parameter 0; an OpenFX host shows it.
 
-**Inherited on purpose: the pop.** The lens has no end stops (open question 1),
-so a transition opens with a cut to the card and closes with a cut from it. The
-plugin's description in the host says so.
+**The one addition: the ends.** The lens has no end stops — the card at
+Transition 0 is A *through the lens*, stepped and ridged — so a transition that
+showed the card throughout would cut to it on its first frame and away from it
+after its last, which on an NLE timeline reads as a glitch. So this build has
+two parameters the FFGL build does not, declared after all of its own in a
+group **Ends**:
+
+- `ends`, a choice: **Fade** (index 0, the default) or **Cut** (index 1). The
+  order is saved by index; never reorder it.
+- `endLength`, 0..0.5 of the transition, 0.15 by default: how long each ramp
+  lasts.
+
+Under Fade the card's strength is `card::CardStrength`: a smoothstep of the
+distance to the nearer end over End Length — exactly 0 at Transition 0 and 1,
+exactly 1 from End Length to 1 − End Length, zero slope at both ends of each
+ramp, so no kink — and the picture is a premultiplied crossfade between the
+plain clip (`card::Plain`: SourceFrom in the first half, SourceTo in the
+second; an input the output's size is returned texel for texel) and the card,
+whose own tilt runs throughout as before. A crossfade is the honest composite
+for a printed card: it is a fade between a picture and a picture of a card,
+not a claim about optics. At exactly 0 and 1 the plugin says it is the clip
+through `isIdentity`, and a render asked anyway copies the clip's pixels in
+their own format when they share the output's bounds, depth, components and
+premultiplication, so the ends are the clips byte for byte. End Length 0 is the
+card everywhere but at exactly 0 and 1. **Cut** is strength 1 everywhere: the
+same code path as before the ends existed, and the Resolume behaviour. None of
+this has a GLSL twin; `lntest --fade` checks it host-free and verify.sh's
+openfx step through a host.
 
 **Verified:** `lntest --cpu` (the twin against the GPU, every pixel, the
 tolerance table above), on the GPU and the software renderer; the bundle is
@@ -377,24 +403,36 @@ or float RGBA, premultiplied clips, render scale 1, no tiles, up to 8 threads)
 rendered the bundle against the FFGL plugin's GPU render of the same bytes
 (`lntest --pipe`, B on `--pipe-src`), at 640×360 with PNG inputs carrying alpha
 0, 51 and 255 (premultiplied exactly in 8 bits, so the bytes the host's
-CoreGraphics reader hands over are known): Transition 0, 0.25, 0.47, 0.5, 0.75
-and 1 at the defaults, moiré (Lens 0.6 over Interleave 0.58), Squeeze off with
-Distance 0.5, the ghost (spot and bleed at 1), full shine on 16 lenses — worst
-**1 of 255** in all ten, nothing off by 2; float buffers at 0.47 the same. The
-host at 0.47 against the GPU at 0.53: 124 of 255 over 144,520 px. The bundle
-rebuilt with SourceFrom and SourceTo swapped: 255 of 255 everywhere —
-reverted. The host's Transition keyed 0 → 1 over frames 0..24 and read at
+CoreGraphics reader hands over are known). With **Ends = Cut**: Transition 0,
+0.25, 0.47, 0.5, 0.75 and 1, moiré (Lens 0.6 over Interleave 0.58), Squeeze off
+with Distance 0.5, the ghost (spot and bleed at 1), full shine on 16 lenses —
+worst **1 of 255** in all ten, nothing off by 2, and all ten **byte-identical**
+to the same renders by a copy of the bundle from before the ends existed; float
+buffers at 0.47 the same. The host at 0.47 against the GPU at 0.53: 124 of 255
+over 144,520 px. The bundle rebuilt with SourceFrom and SourceTo swapped: 255
+of 255 everywhere — reverted. With **Ends = Fade**, the default: Transition 0
+byte-identical to SourceFrom and 1 to SourceTo, through `isIdentity` and
+through a render, 8-bit and float; mid-ramp at 0.03, 0.06, 0.1, 0.9, 0.95 and
+0.985 (strength 0.104 to 0.741), the output within **1 of 255** of
+(1 − s) plain + s GPU card; at 0.15, 0.5 and 0.85 the Cut render's bytes; End
+Length 0 gives SourceFrom at 0 and the Cut render at 0.001. The host's Transition keyed 0 → 1 over frames 0..24 and read at
 frame 12 gives the same output hash as a constant 0.5 (the plugin reads the
 parameter at the render time), and frame 12 after frames 0..11 in one instance
 is byte-identical to frame 12 alone. The CI-built universal bundle renders the
-same hash as the local arm64 one. `tools/verify.sh` runs a five-setting version
-of this (opaque PPM cards, 4-code tolerance derived from `--cpu`'s bound, with
-the control) whenever `OFXPROBE` is a probe that can host a Transition, and
-says it skipped otherwise.
+same hash as the local arm64 one (before the ends). `tools/verify.sh` runs a
+version of this whenever `OFXPROBE` is a probe that can host a Transition, and
+says it skipped otherwise: on opaque PPM cards, five Cut settings against the
+GPU (4-code tolerance derived from `--cpu`'s bound) with the control, Fade's
+two ends byte for byte rendered and through `isIdentity`, two mid-ramp points
+against the crossfade (the same 4 codes: the card's bound scaled by s < 1, plus
+the composite's rounding), and Fade between the ramps against Cut. The bundle
+from before the ends fails it (Fade's ends DIFFER; mid-ramp off by 165 and 81).
 
-**The CPU cost** at 1920×1080 in that host: **7.1–8.2 ms a frame** over 21
-frames of a ramp (the first 10.3), on the 8 threads it gives a plugin (it caps
-its pool at min(cores, 8)); **40 ms** single-threaded, timed outside a host (the
+**The CPU cost** at 1920×1080 in that host: **7.1–8.4 ms a frame** over two
+21-frame ramps (the first rendered frame 10.3–10.5), on the 8 threads it gives a
+plugin (it caps its pool at min(cores, 8)); under Fade the frames at exactly 0
+and 1 are the copy, 0.2 ms, and the ramp frames (card plus plain) cost no more
+than the card's; **40 ms** single-threaded, timed outside a host (the
 gather and the twin over every row). M4 Max. CI builds the bundle on macOS,
 Windows and Linux (AlmaLinux 8, glibc 2.28 — it asks for 2.27) and dlopens it
 on Rocky 8, which finds `com.stoatworks.lenticular`.
@@ -412,9 +450,11 @@ host loaded it.
                             print's phase, the spot's coverage in closed form,
                             the two fetches, the ridge.
     source/Card.*           GL-free: the host values and their defaults, the
-                            setup and the uniforms (both builds), and the
+                            setup and the uniforms (both builds), the
                             shader's per-pixel stage in C++ (card::Shade,
-                            //= mirrored), which the OpenFX build renders with.
+                            //= mirrored), which the OpenFX build renders with,
+                            and the OpenFX build's ends (CardStrength, Plain;
+                            no GLSL twin).
     source/ofx/             the OpenFX transition: LenticularOFX.cpp
                             (marshalling only) and the fleet's
                             StoatworksAboutOFX.h.
@@ -499,7 +539,9 @@ plastic would. Premultiplied alpha is assumed, as the fleet assumes it.
 **No end stops.** Opacity 0 and 1 are not a bitwise A and B, as wipe's are: they
 are A and B *through the lens*, stepped and ridged. That is the product, but it
 means a transition that ends on this mixer will pop from the card to the plain
-clip when Resolume stops using it. See the open questions.
+clip when Resolume stops using it. See the open questions. The OpenFX build has
+end stops as an option of its own — Ends, Fade by default (see "The OpenFX
+build"); the FFGL mixer does not.
 
 **No clock.** Nothing in a card moves unless the viewer or the card does, so
 `SetTime` is not overridden and the harness drives no clock. The fleet's float
@@ -523,8 +565,9 @@ the work.
 2026-09-25, at 640×360 and 320×180, on the GPU and on Apple's software
 renderer:** everything in the tolerance table, and the README's Status table
 restates it with the numbers. `tools/verify.sh` runs all of it on a fresh
-universal build: 2 shaders compile through glslc, 9 suites on the GPU and 8 on the
-software renderer (`--cpu` since 2026-10-03), 11 controls swept, the pipe's three
+universal build: 2 shaders compile through glslc, 10 suites on the GPU and 8 on the
+software renderer (`--cpu` and `--fade` since 2026-10-03; `--fade` and `--names`
+need no GL), 11 controls swept, the pipe's three
 assertions, `plugMain` exported, `x86_64 arm64`, plist, ad-hoc codesign, `oxbow
 probe` reading SW Lenticular / LN01 / mixer / inputs 2..2 / Squeeze (boolean, on)
 at 0 / a standard Opacity; and for the OpenFX bundle, plist, ad-hoc codesign,
@@ -631,18 +674,15 @@ mounted it.
 
 ## Open questions
 
-1. **Should Opacity 0 and 1 be end stops?** A transition that uses this mixer
-   ends with a pop from the lenticular card to the plain clip — now inferred
-   from Arena's own numbers: its last transition frame was at Opacity 0.944 or
-   0.985, B through the lens, and then the plain clip. An option that
-   crossfades the lens away over the last few percent of the fader would fix
-   it, but it would have to start well below 0.94 (Arena never sends 1.0), and
-   it would break `--ends`' meaning at that setting. Left for a later release.
-   The OpenFX transition inherits it, and at **both** ends: the host drives
-   Transition from 0 at the transition's start to 1 at its end, so the first
-   frame cuts to the card (A through the lens) as the last cuts from it. On a
-   timeline, where a transition is scrubbed and rendered rather than played
-   past, an end-stop option may matter more than it does in Resolume.
+1. **Should the FFGL mixer's Opacity 0 and 1 be end stops too?** A Resolume
+   transition that uses this mixer ends with a pop from the lenticular card to
+   the plain clip — inferred from Arena's own numbers: its last transition
+   frame was at Opacity 0.944 or 0.985, B through the lens, and then the plain
+   clip. The OpenFX build answered it for itself on 2026-10-03 with Ends (Fade,
+   the default; Cut is the Resolume behaviour), because a host there drives
+   Transition to exactly 0 and 1. The same fade in the mixer would have to
+   start well below 0.94 (Arena never sends 1.0) and would break `--ends`'
+   meaning at that setting. Left for a later release.
 2. **Should the print's registration to the lens be a control?** A card printed
    a fraction of a strip off-axis flips at another angle — a real defect, one
    parameter away (it is the constant `0.5` the shipped mutation moves).

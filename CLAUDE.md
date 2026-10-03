@@ -60,12 +60,16 @@ touching `ProcessOpenGL`.
 - One character of the shipped GLSL fails --flip: `./build/lntest --mutation`
 - The OpenFX build's CPU twin of the shader against the GPU, per pixel, 14
   settings, with three negative controls: `./build/lntest --cpu`
+- The OpenFX build's ends — exactly the clips at 0 and 1, a smooth ramp, the
+  plain picture bit for bit — with no GL: `./build/lntest --fade`
 - The OpenFX bundle loads and describes as a Transition:
   `../resolume-ofx-bridge/build/ofxprobe --dir build`. The bridge's origin/main
   probe cannot render a transition (Filter context only). A probe that can
   (`--context transition`, e.g. the 2026-10-03 test host) renders it:
   `OFXPROBE=/path/to/that/ofxprobe tools/verify.sh` then compares five
-  settings with the GPU (`lntest --pipe`) and rejects a control.
+  Ends = Cut settings with the GPU (`lntest --pipe`), rejects a control, and
+  checks Fade's ends byte for byte against the clips and two mid-ramp points
+  against the crossfade.
 - ms/frame, 720p through 4K: `./build/lntest --bench` (never loop it at 4K on
   this shared machine)
 - No dead controls: `python3 tools/sweep.py` (`--size WxH`, `--jobs N`)
@@ -145,7 +149,14 @@ Every numeric check runs at 640x360 and 320x180 (`--mixer` at 320x200 and
   `com.stoatworks.lenticular`, label `Lenticular`, group `Stoatworks`, bundle
   id `com.stoatworks.lenticular.ofx` — permanent, saved projects refer to them,
   as do the parameters' camelCase script names. **Transition context only**:
-  SourceFrom = A, SourceTo = B, the host's `Transition` = Opacity. No Filter
+  SourceFrom = A, SourceTo = B, the host's `Transition` = Opacity. Two
+  OpenFX-only params after the rest, group Ends: `ends` (choice, **Fade 0 —
+  the default — / Cut 1**; the order is saved by index) and `endLength`
+  (0..0.5 of the transition, 0.15). Fade: exactly SourceFrom at 0 and
+  SourceTo at 1 (`isIdentity`, plus a same-format pixel copy), a smoothstep
+  crossfade with the card over each End Length (`card::CardStrength`,
+  `card::Plain`, no GLSL twin). Cut: the card alone, the FFGL behaviour, bit
+  for bit. No Filter
   (nothing to flip to) and no General (a different product, and in Resolve
   presumably a second entry among the clip effects): Nuke does not list it, by
   decision.
