@@ -10,7 +10,10 @@ opacity fader tilting the card. C++17 + GLSL 4.10, CMake, universal macOS
 Resolume Arena 7.27.1 on Windows (see "What Lenticular showed in Arena"), never
 on macOS. The fleet's fourth mixer,
 after genlock, wipe and relay. Tranche five, started 2026-09-25; Allan picked the
-idea.
+idea. Since 2026-10-03 the same card also builds as an **OpenFX Transition**
+(`source/ofx/LenticularOFX.cpp`), one of the fleet's first, rendered on the CPU
+by a C++ twin of the shader — see "The OpenFX build". Rendered through a test
+OFX host with a Transition context; never loaded into Resolve or Vegas.
 
 `CLAUDE.md` is the command reference. This file is the *why*: the idea, every
 number in the harness and where it comes from, the traps this build actually hit,
@@ -65,9 +68,11 @@ window on the picture where it is (A at n + u). Where the spot centre is on the
 OTHER picture's strip, each picture is taken from its nearest strip edge —
 A at n + min( 2u, 1 ), B at n + max( 2u − 1, 0 ) — which is continuous in u.
 
-The CPU does nothing but convert parameters (`Controls.cpp`) and hand them over
+In the FFGL build the CPU does nothing but convert parameters (`Controls.cpp`),
+make them into the setup and the uniforms (`Card.cpp`) and hand them over
 (`ProcessOpenGL`). There is no clock, no buffer and no state from one frame to
-the next.
+the next. The OpenFX build runs the same conversion and then the shader's
+per-pixel stage itself, from a C++ transcription (`card::Shade`).
 
 ---
 
@@ -126,6 +131,7 @@ least three times it.
 | `--distance` | **0.05 px**; derived bound ≤ **0.0035 px** | The flip's position is the sum of m across a window holding the one ramp (a linear functional, so a translated ramp moves the sum exactly, genlock's lesson). The sum of a linear ramp at pixel centres is its integral but for its two kinks, each at most slope / 8 px²; plus 8 ULP / w of m on each ramp pixel; plus a few ULP of tan carried to x through D / cos T. The window is derived from the geometry (half way between this ramp and the next strip edge's) and asserted to hold exactly one ramp and to fit the picture. Measured worst 0.0009 px. |
 | `--opacity` | **1e-5 rad**; derived bound **6.0e-7** | m to 8 ULP / w, the tilt from it to w × that / F, plus 2 ULP of the tilt's sine and cosine. The inversion m → t is the box spot's linear ramp, valid because F tan( max ) = 0.2 is inside the ramp's ±0.225. Measured worst 5.5e-8 (GPU), 4.0e-8 (software). |
 | `--mutation` | **fails** | See below. |
+| `--cpu` | **three times a bound derived per setting**: 6.2 to 20.1 of 255 a channel here; bounds 2.05 to 6.71 | The OpenFX build's CPU twin against the GPU, float framebuffer against float, every pixel, 14 settings × 3 raster/input-size cases. Three terms. (1) The GPU's bilinear weights may be quantised — 8 bits of sub-texel precision is Direct3D 11's figure (`D3D11_SUBTEXEL_FRACTIONAL_BIT_COUNT`) — so each axis's weight may be off by 2^-8, moving a fetch by that times the largest step between neighbouring texels of the inputs (measured from them, ≤ 1): 2 × 2^-8 × step. (2) GLSL 4.10 specifies no precision for `sin` or `atan`; taking each as good to 2^-10 absolute (Direct3D specifies its sincos to 0.0008), the highlight's centre moves by 1.5 × 2^-10 / ( 2 sin 35° ) of a lens, g by that over HighlightWidth, and h = Shine exp( −g² ) by Shine √(2/e) times g's error — zero at Ridge Shine 0, 4.7 of 255 at Shine 1 on 16 lenses. (3) 2^-12 for the rest of the float arithmetic. A column whose X N_L is within 8 ULP of a lens edge is excluded and counted (a GPU division is 2.5 ULP and a lens edge is a step); none occurred in 7.3 M pixels, and at most 1 in 1000 is allowed. Measured worst **0.65 of 255** (GPU), **3.1 of 255** (software, at full shine — its trigonometry). RGBA8 framebuffer against the twin rounded: **1 of 255** (GPU), 4 (software). |
 | `--bench` | not asserted | No threshold is worth asserting on somebody else's GPU, on a machine shared with seven other builds. |
 
 **Negative controls live in the shipping class.** `Lenticular::SetFaultForTest`
@@ -145,6 +151,13 @@ Plus picture-level negatives with no fault: `--ends` rejects the other Squeeze's
 samples, the card at the flip and the card with shine; `--flip` rejects a card at
 Distance 2 as one value.
 
+`--cpu` carries three of its own, each of which fails the same comparison: the
+twin a fader step off the GPU (0.47 against 0.53: worst 74 of 255), the twin
+sampling GL_NEAREST where the GPU samples GL_LINEAR (`kFaultNearestTexel`, the
+one fault that lives in `Card.cpp` rather than the shader: worst 37 of 255), and
+`--mutation`'s one-character GLSL edit compiled into the GPU with the C++ left
+alone (worst 211 of 255) — the drift the check exists to catch.
+
 ### Would this hold on another rasteriser, at another raster?
 
 - `--mixer`: yes — constant regions, one source texel and one lens, as genlock
@@ -163,6 +176,10 @@ Distance 2 as one value.
   the kink residual scales as 1 / (ramp width in pixels) and is computed for it
   (0.0023 px at 640, 0.0035 at 320).
 - `--opacity`: yes — no raster in it, as `--flip`.
+- `--cpu`: on another GPU, as far as its filter weights have 8 bits and its
+  `sin` and `atan` 2^-10, which is what the bound assumes and says. A GPU
+  coarser than that fails it at Ridge Shine 1 first; that would be a finding
+  about the GPU's trigonometry, and the bound is where to change it.
 - `--mutation`: the default path and the hook are two compiles of the same text
   in one context; a compiler that compiled the same source two ways would fail it.
 - Two rasterisers have run all of it: this Mac's GPU and Apple's software
@@ -264,6 +281,16 @@ in, under `~/Projects`. `git -C /Users/allansargeant/dev/lenticular commit`
 passes, as the machine's rule (always `git -C`) says it should. No
 `CLAUDE_WORKTREE_EXEMPT` was needed or used anywhere in this repo.
 
+**`--cpu`'s first bound passed the software renderer for the wrong reason.** It
+allowed 2^-12 for "float", reasoning that no GPU's `sin` is worse than 2^-16. Apple's
+software renderer's is about 1e-3 (inferred from the highlight: 3.1 of 255 at
+full shine is a 0.014 error in g, i.e. ~9.8e-4 in the sine), so the full-shine
+setting measured 3.1 of 255 against a 2.05 bound and passed only because the
+tolerance was three times it. GLSL 4.10 promises nothing for `sin` or `atan`;
+the bound now carries the ridge's trigonometry per setting at 2^-10, scaled by
+that setting's Shine and HighlightWidth, and every measurement is inside its
+bound.
+
 Inherited and avoided on cue: the scoped bindings clearing rather than restoring;
 `StoatworksAboutParams.h` needing the SDK first; the OBJECT library; the 0..1
 clamp on STANDARD defaults; the `SetTextParameter` override; GLSL reserved words
@@ -272,16 +299,131 @@ clamp on STANDARD defaults; the `SetTextParameter` override; GLSL reserved words
 
 ---
 
+## The OpenFX build
+
+`source/ofx/LenticularOFX.cpp`, `com.stoatworks.lenticular`, label
+**Lenticular**, group **Stoatworks**, bundle id `com.stoatworks.lenticular.ofx`.
+One of the fleet's first OpenFX **Transition**-context plugins (wipe, relay and
+pilot were being ported alongside it).
+
+**The mapping is one to one.** The mixer's A (`inputTextures[0]`, the layer
+below) is the transition's `SourceFrom`; B (`inputTextures[1]`, this layer) is
+`SourceTo`; Opacity, which Resolume binds to the layer's fader and ramps in a
+transition, is the host's mandated `Transition` parameter, 0 → 1. In the
+Transition context the plugin may describe that parameter and read it, nothing
+more, so it carries no label, range or page here. Every other parameter keeps
+its FFGL name (as a camelCase script name: `squeeze`, `interleavePitch`,
+`bleed`, `lensPitch`, `focalLength`, `focusSpot`, `distance`, `angleRange`,
+`ridgeShine`, `lightAngle` — a saved project refers to these, never rename one),
+its 0..1 range, its default and its group. The About block is the fleet's
+`StoatworksAboutOFX.h`.
+
+**One copy of everything but the per-pixel stage.** `source/Card.{h,cpp}` is
+GL-free and linked into both builds through the `lenticular_card` OBJECT
+library: `HostValues` (whose member initialisers are both builds' defaults),
+`SetupFor` (the setup arithmetic that used to be inline in `ProcessOpenGL`) and
+`UniformsFor` (the floats the shader is handed). `ProcessOpenGL` now calls the
+last two, so the GPU and the CPU twin are handed the same floats bit for bit;
+the move was checked by rendering five settings through the old and new FFGL
+builds and comparing the PNGs byte for byte (identical). The shader's per-pixel
+stage is written twice: in GLSL, and in `card::Shade`, line for line in float,
+each function marked `//= mirrored` on both sides under its GLSL name. The
+sampler is the GL's: the level-0 GL_LINEAR equation, CLAMP_TO_EDGE, texel
+centres at ( i + ½ ) / W, after the shader's own half-texel clamp. The moiré and
+the ghost both depend on that — a lens samples the print once, between texels —
+which is why GL_NEAREST is one of `--cpu`'s negative controls. The GLSL's marker
+comments are part of its text, so `demo/plugin.js` carries them too
+(check_shaders.py holds the two to the character).
+
+**What the OpenFX file does** is marshalling: each input gathered to
+premultiplied float RGBA, row 0 at the bottom (OpenFX's orientation and the
+GL's, so nothing flips), on the host's threads; `card::Shade` per pixel of the
+render window through an `OFX::ImageProcessor`; out to 8-bit, 16-bit or float,
+RGBA or RGB, un-premultiplied if the host asked. The picture is the output's
+bounds; each input is stretched over it by its own bounds, as the mixer stretches
+each layer. A side with no frame is one transparent texel. Tiles are declined (a
+lens fetches up to a whole interleave period from the pixel it lands in).
+Factories are heap-leaked in `getPluginIDs` (the fleet's exit-teardown trap).
+
+**Contexts: Transition only.** A Filter has one input and nothing to flip to.
+General would be a few lines but a different product — a two-input node whose
+tilt nobody drives, since the host owns `Transition` only in the Transition
+context — and in Resolve a General-context plugin is offered among the clip
+effects too (as the fleet's filters are; not tried with this one), where it
+would appear with one clip and nothing to flip to. So Nuke, which has no
+Transition context, does not list this build. A decision, not an oversight.
+
+**Nothing to drop.** The FFGL build has no audio, no clock, no buffer, no presets
+and no event controls but the About links, so every OpenFX frame is a pure
+function of the two inputs and the parameters at that frame's time — exactly
+what a host that renders frames out of order, alone and concurrently needs. The
+one thing that does not carry over is Squeeze being hidden: Arena hides a
+mixer's parameter 0; an OpenFX host shows it.
+
+**Inherited on purpose: the pop.** The lens has no end stops (open question 1),
+so a transition opens with a cut to the card and closes with a cut from it. The
+plugin's description in the host says so.
+
+**Verified:** `lntest --cpu` (the twin against the GPU, every pixel, the
+tolerance table above), on the GPU and the software renderer; the bundle is
+universal, exports `OfxGetPlugin`, ad-hoc signs, and `ofxprobe` (the fleet's
+probe host, from resolume-ofx-bridge) loads it and reads its identifier, label,
+group and contexts — all in `tools/verify.sh`. The bridge's origin/main probe
+instantiates only the Filter context, so it cannot render a transition.
+
+**Through a host, 2026-10-03.** A test build of that probe with a Transition
+context (`--context transition --from --to --transition`, a CPU host: 8-bit
+or float RGBA, premultiplied clips, render scale 1, no tiles, up to 8 threads)
+rendered the bundle against the FFGL plugin's GPU render of the same bytes
+(`lntest --pipe`, B on `--pipe-src`), at 640×360 with PNG inputs carrying alpha
+0, 51 and 255 (premultiplied exactly in 8 bits, so the bytes the host's
+CoreGraphics reader hands over are known): Transition 0, 0.25, 0.47, 0.5, 0.75
+and 1 at the defaults, moiré (Lens 0.6 over Interleave 0.58), Squeeze off with
+Distance 0.5, the ghost (spot and bleed at 1), full shine on 16 lenses — worst
+**1 of 255** in all ten, nothing off by 2; float buffers at 0.47 the same. The
+host at 0.47 against the GPU at 0.53: 124 of 255 over 144,520 px. The bundle
+rebuilt with SourceFrom and SourceTo swapped: 255 of 255 everywhere —
+reverted. The host's Transition keyed 0 → 1 over frames 0..24 and read at
+frame 12 gives the same output hash as a constant 0.5 (the plugin reads the
+parameter at the render time), and frame 12 after frames 0..11 in one instance
+is byte-identical to frame 12 alone. The CI-built universal bundle renders the
+same hash as the local arm64 one. `tools/verify.sh` runs a five-setting version
+of this (opaque PPM cards, 4-code tolerance derived from `--cpu`'s bound, with
+the control) whenever `OFXPROBE` is a probe that can host a Transition, and
+says it skipped otherwise.
+
+**The CPU cost** at 1920×1080 in that host: **7.1–8.2 ms a frame** over 21
+frames of a ramp (the first 10.3), on the 8 threads it gives a plugin (it caps
+its pool at min(cores, 8)); **40 ms** single-threaded, timed outside a host (the
+gather and the twin over every row). M4 Max. CI builds the bundle on macOS,
+Windows and Linux (AlmaLinux 8, glibc 2.28 — it asks for 2.27) and dlopens it
+on Rocky 8, which finds `com.stoatworks.lenticular`.
+
+**Not verified:** DaVinci Resolve, Vegas or any production host. How they
+marshal SourceFrom, SourceTo, the Transition parameter, premultiplication,
+render scale and tiles into it has not been seen; nor has a Windows or Linux
+host loaded it.
+
+---
+
 ## Shape of the code
 
     source/Shaders.cpp      the pass. One vertex, one fragment: the lens, the
                             print's phase, the spot's coverage in closed form,
                             the two fetches, the ridge.
+    source/Card.*           GL-free: the host values and their defaults, the
+                            setup and the uniforms (both builds), and the
+                            shader's per-pixel stage in C++ (card::Shade,
+                            //= mirrored), which the OpenFX build renders with.
+    source/ofx/             the OpenFX transition: LenticularOFX.cpp
+                            (marshalling only) and the fleet's
+                            StoatworksAboutOFX.h.
+    external/openfx/        the fleet's vendored OFX SDK subset (BSD-3).
     source/Lens.h           the geometry, written down; the model constants
                             (ridge slope, highlight, shading, residual
                             magnification); the per-frame Setup.
-    source/Lenticular.*     the plugin: type, parameters, the two inputs, the
-                            parameters turned into uniforms.
+    source/Lenticular.*     the FFGL plugin: type, parameters, the two inputs,
+                            the uniforms (from Card.cpp) handed to the shader.
     source/Controls.*       0..1 host parameters to counts, lens pitches,
                             picture widths, radians.
     source/Diag.*           a log file: the host, the inputs' sizes, what drove
@@ -381,11 +523,15 @@ the work.
 2026-09-25, at 640×360 and 320×180, on the GPU and on Apple's software
 renderer:** everything in the tolerance table, and the README's Status table
 restates it with the numbers. `tools/verify.sh` runs all of it on a fresh
-universal build: 2 shaders compile through glslc, 8 suites on the GPU and 7 on the
-software renderer, 11 controls swept, the pipe's three assertions, `plugMain`
-exported, `x86_64 arm64`, plist, ad-hoc codesign, `oxbow probe` reading SW
-Lenticular / LN01 / mixer / inputs 2..2 / Squeeze (boolean, on) at 0 / a standard
-Opacity.
+universal build: 2 shaders compile through glslc, 9 suites on the GPU and 8 on the
+software renderer (`--cpu` since 2026-10-03), 11 controls swept, the pipe's three
+assertions, `plugMain` exported, `x86_64 arm64`, plist, ad-hoc codesign, `oxbow
+probe` reading SW Lenticular / LN01 / mixer / inputs 2..2 / Squeeze (boolean, on)
+at 0 / a standard Opacity; and for the OpenFX bundle, plist, ad-hoc codesign,
+`OfxGetPlugin`, `x86_64 arm64`, and `ofxprobe` reading com.stoatworks.lenticular /
+Lenticular / Stoatworks / Transition only — plus, when `OFXPROBE` names a probe
+that can host a Transition, five renders through it against the GPU and a
+rejected control.
 
 **The render cost**, `lntest --bench`, 120 frames after a 20-frame warm-up,
 `glFinish` both sides, worst of three runs (defaults at the flip; the moiré case
@@ -423,8 +569,12 @@ close to what a `glFinish` round trip costs to observe, and 4K came back at 0.03
 - **Vertical lenticules only.** Real cards are also made with horizontal ones
   (flip by tipping, not turning); not a control.
 - **The hero image** is the harness's render, not Resolume's.
-- No user guide, no presets, no OpenFX port. The browser demo exists and is a
-  port, not the plugin; see *The browser demo* below.
+- **The OpenFX transition has never been loaded into Resolve or Vegas.** Its
+  per-pixel stage is measured against the GPU (`--cpu`) and it matched the GPU
+  through a test OFX host with a Transition context; a production host's
+  marshalling is unseen. See "The OpenFX build".
+- No presets. The browser demo exists and is a port, not the plugin; see *The
+  browser demo* below.
 
 ---
 
@@ -488,6 +638,11 @@ mounted it.
    crossfades the lens away over the last few percent of the fader would fix
    it, but it would have to start well below 0.94 (Arena never sends 1.0), and
    it would break `--ends`' meaning at that setting. Left for a later release.
+   The OpenFX transition inherits it, and at **both** ends: the host drives
+   Transition from 0 at the transition's start to 1 at its end, so the first
+   frame cuts to the card (A through the lens) as the last cuts from it. On a
+   timeline, where a transition is scrubbed and rendered rather than played
+   past, an end-stop option may matter more than it does in Resolume.
 2. **Should the print's registration to the lens be a control?** A card printed
    a fraction of a strip off-axis flips at another angle — a real defect, one
    parameter away (it is the constant `0.5` the shipped mutation moves).

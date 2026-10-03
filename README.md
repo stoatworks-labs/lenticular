@@ -13,12 +13,18 @@
 > **0.001 px** (see [Status](#status)). It has **never been loaded into
 > Resolume on macOS**; on Windows, Resolume Arena 7.27.1 loads it and drives its
 > tilt from the layer's fader and from a transition. It is the fleet's fourth
-> FFGL *mixer*, after genlock, wipe and relay. Check it in your own rig before
-> trusting it in a show.
+> FFGL *mixer*, after genlock, wipe and relay. The **OpenFX transition** build
+> renders with a line-for-line C++ twin of the shader, compared with the GPU
+> per pixel to within **0.65 of 255** a channel here, and in a test OpenFX host
+> that renders transitions it matches the FFGL plugin's GPU render to **1 of
+> 255** — but it has **never been loaded into DaVinci Resolve or Vegas**. Check
+> it in your own rig before trusting it in a show.
 
 A printed lenticular sheet that shows one layer or the other, as an FFGL
 **mixer** for [Resolume](https://resolume.com) Arena and Avenue. The layer's
-opacity fader tilts the card.
+opacity fader tilts the card. The same card also builds as an
+[OpenFX **transition**](#openfx--resolve-and-vegas-as-a-transition) for DaVinci
+Resolve and Vegas Pro, tilted by the transition itself.
 
 ![A lenticular card mid-flip, with a slight pitch mismatch](docs/hero.png)
 
@@ -137,6 +143,65 @@ and it is named Opacity on purpose: Resolume binds a mixer parameter of that
 name to the **layer's opacity fader**, and a layer transition ramps it
 (measured on relay), so the layer's own fader, or a transition, tilts the card.
 
+## OpenFX — Resolve and Vegas, as a transition
+
+The same card also builds as an **OpenFX transition**. In a host with an OpenFX
+Transition context — DaVinci Resolve and Vegas Pro — it is listed among the
+transitions as **Stoatworks → Lenticular**, and the transition's own progress
+tilts the card. The mixer's two layers and its fader map one to one:
+
+| | FFGL mixer (Resolume) | OpenFX transition |
+| --- | --- | --- |
+| **A**, printed in each lens's first strip | the layer below | **SourceFrom**, the outgoing clip |
+| **B**, in the second strip | this layer | **SourceTo**, the incoming clip |
+| **The tilt** | Opacity, the layer's fader | the host's **Transition**, 0 → 1 |
+
+Copy `Lenticular.ofx.bundle` from the `lenticular-ofx-*` zip for your platform
+into the standard OpenFX folder, then restart the host. The zips ship from the
+first release after v0.1.0, which predates the port; until then, build it
+(below).
+
+```
+macOS    /Library/OFX/Plugins/
+Windows  C:\Program Files\Common Files\OFX\Plugins\
+Linux    /usr/OFX/Plugins/
+```
+
+**It is the same card.** Every other control is the FFGL build's — the same
+names, 0..1 ranges, defaults and groups (Print, Lens, View) — and the same
+arithmetic: the OpenFX build links the FFGL build's own parameter mappings,
+lens setup and uniform computation (`source/Card.h`), and renders each pixel
+with a line-for-line C++ transcription of the card shader, bilinear sampling
+included, which `lntest --cpu` holds to the GPU per pixel. It renders on the
+CPU, on every thread the host offers: about 8 ms a 1080p frame in a test host
+that gives it 8 threads of an M4 Max, 40 ms on one thread.
+
+What differs from the FFGL build, and why:
+
+- **No Opacity control.** Its job is the host's Transition parameter:
+  −Angle Range at the transition's start, square on halfway through, +Angle
+  Range at its end. Angle Range sets how far it turns; the transition's
+  length, how fast.
+- **A transition, and nothing else.** A one-input filter would have nothing to
+  flip to, and a General-context node would be a different product (a
+  two-input node with a tilt slider of its own) that would, in Resolve, also
+  appear among the clip effects. So a host with no Transition context — Nuke
+  among them — does not list this build at all.
+- **The ends pop**, as the end of a Resolume transition does. The lens has no end stops:
+  Transition 0 is the card tilted to A *through the lens* — stepped at the lens
+  pitch, ridged — not the plain outgoing clip, so the transition opens with a
+  cut to the card and closes with a cut from it. The plugin's description in
+  the host says so.
+- **Squeeze is reachable.** Arena hides a mixer's first parameter, so in
+  Resolume Squeeze is always on; an OpenFX host shows every parameter.
+- **Inputs of another size are stretched to the output**, each by its own
+  bounds, as the mixer stretches each layer.
+
+Nothing else is missing: the FFGL build has no audio, no clock, no buffer and
+no presets, so every frame was already a pure function of the two inputs and
+the parameters at that frame — which is exactly what a host that renders frames
+out of order, alone and on several threads needs.
+
 ## Build
 
 Needs CMake and the Resolume FFGL SDK, which is a submodule.
@@ -151,6 +216,12 @@ cmake --install build    # → ~/Documents/Resolume Arena/Extra Effects
 
 macOS builds universal (arm64 + x86_64) by default. Add
 `-DCMAKE_OSX_ARCHITECTURES=arm64` for a faster development build.
+
+The same build makes the OpenFX transition, `build/Lenticular.ofx.bundle`
+(`-DBUILD_OFX=OFF` to skip it). `cmake --install` does not install it: copy it
+into the OpenFX folder above by hand. With `-DLENTICULAR_BUILD_FFGL=OFF` the
+configure needs nothing but a compiler — no FFGL SDK, no GLEW — and builds the
+OpenFX plugin alone; that is how the Linux release job builds it.
 
 The install path is **Extra Effects**, although this is a mixer. Resolume has
 one FFGL folder, and sources, effects and mixers all load from it: genlock, wipe
@@ -172,10 +243,14 @@ different sizes, with different hardware padding, rendered to a third size.
     ./build/lntest --distance               a near viewer's flip lands at D sin T
     ./build/lntest --opacity                Opacity tilts the card monotonically from -max to +max
     ./build/lntest --mutation               one character of the shipped GLSL fails --flip
+    ./build/lntest --cpu                    the OpenFX build's CPU twin of the shader against the GPU, per pixel
+    ./build/lntest --twin --out /tmp/f.png  render through the CPU twin instead of the GPU
     ./build/lntest --bench                  720p through 4K
     ./build/lntest --pipe --pipe-src F      two raw RGBA streams in, frames out (filming, not a check)
     python3 tools/sweep.py                  no control is silently dead
     tools/verify.sh                         all of it, on a fresh universal build
+    OFXPROBE=<probe> tools/verify.sh        and the OpenFX transition rendered through a
+                                            probe host that has a Transition context
 
 Every check runs at **two rasters**, 640×360 and 320×180, on this Mac's GPU
 **and** on Apple's software renderer, and every tolerance is derived from
@@ -211,6 +286,10 @@ stated, on the GPU and on Apple's software renderer:
 | Host metadata | `oxbow probe` reads **SW Lenticular / LN01 / mixer / inputs 2..2**, parameter 0 **Squeeze** |
 | Resolume Arena 7.27.1 (Windows, llvmpipe) | a CI build loads from Extra Effects, registers as `SW Lenticular` / LN01 / category 2, is offered as a layer **Blend Mode** and as a **transition**, initialises on Mesa; the panel shows **15 of 16** parameters, hiding only **Squeeze** (index 0, on purpose); the layer's opacity 0.2 / 0.85 / 0.5 / 1.0 reached the plugin as `Opacity` (its own log), a write to the mixer's own Opacity was overridden; a 2 s transition ran its own instance from Opacity **0.007 to 0.944** (and 0.003 to 0.985) — probed over REST, no frame of the picture captured |
 | Render cost | **0.021 ms/frame at 720p, 0.035 at 1080p, 0.10 at 4K** (0.6% of a 60 fps frame), worst of three runs on a shared machine |
+| OpenFX: the CPU twin against the GPU (`--cpu`, 2026-10-03) | 14 settings — seven fader positions and seven others between them exercising every control (moiré, Squeeze off with a near viewer, the ghost, full shine on 16 lenses, an ideal lens, F 0.5 on 480 lenses, F 6 detuned) — at 640×360 and 320×180 with both inputs at the output's size, and at 640×360 with A 400×250 and B 256×144: float framebuffer against float, worst **0.65 of 255** a channel on the GPU, **3.1 of 255** on the software renderer (full shine: its sin and atan); an RGBA8 framebuffer against the twin rounded differs by at most **1 of 255** (4 on the software renderer); no pixel needed the lens-edge exclusion. Each tolerance is three times a bound derived per setting (the filter's 8-bit weights × the inputs' largest neighbouring step, the ridge's trigonometry at 2^-10, 2^-12 of float). Negative controls: a fader step off (**74 of 255**), GL_NEAREST for GL_LINEAR (**37 of 255**), and --mutation's one-character GLSL edit with the C++ left alone (**211 of 255**) all fail |
+| OpenFX bundle | universal (`x86_64 arm64`), exports `OfxGetPlugin`, ad-hoc signs; `ofxprobe` loads it and reads **com.stoatworks.lenticular**, label Lenticular, group Stoatworks, contexts **Transition** only |
+| OpenFX in a host (2026-10-03) | a test CPU host built from the bridge's `ofxprobe` with a Transition context (`--context transition`), driving SourceFrom, SourceTo and Transition, against the FFGL plugin's GPU render of the same premultiplied bytes (`lntest --pipe`), 640×360, inputs with alpha 0, 51 and 255: Transition 0, 0.25, 0.47, 0.5, 0.75 and 1 at the defaults, moiré, Squeeze off with a near viewer, the ghost, full shine on 16 lenses — worst **1 of 255** in every one, no pixel off by more; float buffers the same. The host at 0.47 against the GPU at 0.53 differs by **124 of 255**, and the bundle with SourceFrom and SourceTo swapped by **255**. The host's Transition keyed 0 → 1 over 24 frames and read at frame 12 renders the same hash as a constant 0.5, and frame 12 after frames 0..11 in one instance is byte-identical to frame 12 alone. The CI-built universal bundle renders byte-identically to the local one. `tools/verify.sh` runs a five-setting version of this when its `OFXPROBE` can host a Transition |
+| OpenFX CPU cost | **7.1–8.2 ms a 1080p frame** (first frame 10.3) in that host, which gives a plugin 8 threads of an M4 Max; **40 ms** on one thread, timed outside a host |
 
 Run `tools/verify.sh` before believing any of it.
 
@@ -225,8 +304,16 @@ seen. The harness has run on two rasterisers, this Mac's GPU and Apple's softwar
 renderer; Mesa llvmpipe has compiled and run the shaders in Arena, but no check
 has been read off it. The ridge highlight, the edge
 shading and the residual magnification are looks, not a model of any sheet; the
-lens is a thin lens in air, with no refraction into the plastic. No user guide,
-no presets, no OpenFX port. The browser demo is a port, not the plugin.
+lens is a thin lens in air, with no refraction into the plastic. No presets.
+The browser demo is a port, not the plugin.
+
+**The OpenFX transition has never been loaded into DaVinci Resolve or Vegas.**
+It has rendered transitions in a test host — the fleet's own CPU probe, given a
+Transition context — and matched the GPU there, but how Resolve and Vegas
+marshal SourceFrom, SourceTo, the Transition parameter, premultiplication and
+render scale into it has not been seen, and no GPU-accelerated host has run it.
+CI builds it on macOS, Windows and Linux and dlopens it on Rocky 8; it has never
+been loaded on Windows or Linux by a host.
 
 [AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
 measured, the open questions, and the traps.
