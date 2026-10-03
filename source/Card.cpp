@@ -296,4 +296,41 @@ void Render( const Uniforms& uniforms, const Texture& a, const Texture& b, float
 	}
 }
 
+//---------------------------------------------------------------------------
+// The ends. OpenFX only; see Card.h. Nothing here has a GLSL twin.
+//---------------------------------------------------------------------------
+float CardStrength( float transition, bool fade, float endLength )
+{
+	if( !fade )
+		return 1.0f;
+
+	//The distance to the nearer end of the transition, 0 at both ends.
+	const double t    = std::min( std::max( static_cast< double >( transition ), 0.0 ), 1.0 );
+	const double edge = std::min( t, 1.0 - t );
+	if( edge <= 0.0 )
+		return 0.0f;//exactly the plain clip, whatever the length
+
+	const double length = std::min( std::max( static_cast< double >( endLength ), 0.0 ), static_cast< double >( kEndLengthMax ) );
+	if( edge >= length )
+		return 1.0f;//exactly the card, between the ramps (and everywhere else at length 0)
+
+	//Smoothstep: 0 and 1 at the ends of the ramp, with zero slope at both.
+	const double x = edge / length;
+	return static_cast< float >( x * x * ( 3.0 - 2.0 * x ) );
+}
+
+void Plain( const Uniforms& u, const Texture& t, int px, int py, float out[ 4 ] )
+{
+	if( t.rgba != nullptr && t.width == u.outW && t.height == u.outH )
+	{
+		const float* p = t.rgba + ( static_cast< size_t >( py ) * static_cast< size_t >( t.width ) + static_cast< size_t >( px ) ) * 4;
+		for( int c = 0; c < 4; ++c )
+			out[ c ] = p[ c ];
+		return;
+	}
+	const float X = ( static_cast< float >( px ) + 0.5f ) / static_cast< float >( u.outW );
+	const float Y = ( static_cast< float >( py ) + 0.5f ) / static_cast< float >( u.outH );
+	fetch( t, X, Y, out, 0 );
+}
+
 } // namespace lenticular::card

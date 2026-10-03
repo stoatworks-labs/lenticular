@@ -201,6 +201,7 @@ if(LENTICULAR_BUILD_TOOLS AND APPLE)
     add_test(NAME opacity  COMMAND lntest --opacity)
     add_test(NAME mutation COMMAND lntest --mutation)
     add_test(NAME cpu      COMMAND lntest --cpu)
+    add_test(NAME fade     COMMAND lntest --fade)
 endif()
 
 endif()  # LENTICULAR_BUILD_FFGL

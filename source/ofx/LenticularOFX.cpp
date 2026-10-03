@@ -51,13 +51,30 @@
 /// time, which is exactly what a host that renders frames out of order, alone
 /// and concurrently needs.
 ///
-/// ------------------------------------------------------- inherited, on purpose
+/// ------------------------------------------------------- the ends: the one addition
 ///
-/// **The lens has no end stops.** Transition 0 is the card tilted to A *through
-/// the lens* -- stepped at the lens pitch, ridges and all -- not the plain
-/// SourceFrom clip, so a transition opens with a cut to the card and closes
-/// with a cut from it. Resolume shows the same pop at a transition's end. It
-/// is the effect as designed, and the plugin description says so.
+/// **The lens has no end stops**, so the card at Transition 0 is A *through
+/// the lens* -- stepped, ridged -- not the plain SourceFrom clip. In Resolume
+/// that is a pop at a transition's end; on an NLE timeline a transition that
+/// cut to the card on its first frame and away from it after its last would
+/// read as a glitch. So this build, and only this build, has two controls of
+/// its own, declared after everything the FFGL build has:
+///
+///   Ends        Fade (default): the card fades in over the first End Length
+///               of the transition, from exactly SourceFrom, and out over the
+///               last, to exactly SourceTo -- a smoothstep crossfade in
+///               premultiplied colour, the card's own tilt running throughout.
+///               Cut: the card alone, the FFGL behaviour, bit for bit.
+///   End Length  0..0.5 of the transition each ramp lasts; 0.15 by default.
+///
+/// At exactly 0 and 1 under Fade the picture is the plain clip, and the
+/// plugin says so twice: `isIdentity` names the clip (a host may then skip
+/// the render), and a render that is asked anyway copies the clip's pixels in
+/// its own format when it shares the output's bounds, depth and components --
+/// so the ends are byte-identical to the clips, not a round trip through
+/// float that is merely close. The ramp itself is `card::CardStrength` and
+/// the plain picture `card::Plain`, both in Card.cpp, neither with a GLSL
+/// twin.
 ///
 /// ------------------------------------------------------- tiles
 ///
@@ -68,6 +85,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <vector>
 
@@ -96,9 +114,12 @@ constexpr const char* kPluginDescription =
 	"the light on its ridges.\n\n"
 	"SourceFrom is printed in each lens's first strip and SourceTo in the "
 	"second; the transition's progress is the tilt, from -Angle Range at the "
-	"start to +Angle Range at the end. The lens has no end stops, so the first "
-	"and last frames are the card, not the plain clips: the transition cuts "
-	"to the card and from it. The Resolume build does the same.\n\n"
+	"start to +Angle Range at the end.\n\n"
+	"Ends: Fade (the default) starts on exactly SourceFrom and finishes on "
+	"exactly SourceTo, fading the card in over the first End Length of the "
+	"transition and out over the last. Cut shows the card from the first "
+	"frame to the last, cutting to it and away from it, as the Resolume build "
+	"does.\n\n"
 	"https://stoatworks-labs.com";
 
 // Script names. A saved project refers to these: never rename one.
@@ -112,6 +133,15 @@ constexpr const char* kParamDistance        = "distance";
 constexpr const char* kParamAngleRange      = "angleRange";
 constexpr const char* kParamRidgeShine      = "ridgeShine";
 constexpr const char* kParamLightAngle      = "lightAngle";
+// OpenFX only, after everything the FFGL build has. Ends is a choice whose
+// option ORDER is saved by index: Fade 0, Cut 1, for ever.
+constexpr const char* kParamEnds      = "ends";
+constexpr const char* kParamEndLength = "endLength";
+enum EndsOption
+{
+	kEndsFade = 0,
+	kEndsCut  = 1,
+};
 
 using namespace lenticular;
 
@@ -264,6 +294,13 @@ struct Frame
 	card::Uniforms uniforms;
 	card::Texture a, b;
 	bool premultipliedOut = true;
+
+	/// How much of the card is seen (card::CardStrength), and the plain
+	/// picture it is crossfaded with: SourceFrom in the first half of the
+	/// transition, SourceTo in the second. At 1 -- Cut, or between the ramps --
+	/// the pixel is card::Shade's alone, by the same path as before the ends.
+	float strength            = 1.0f;
+	const card::Texture* plain = nullptr;
 };
 
 class CardProcessorBase : public OFX::ImageProcessor
@@ -311,7 +348,22 @@ public:
 				float out[ 4 ];
 				//The picture is the output's bounds: pixel (0, 0) is its
 				//bottom-left, as the shader's floor( uv * OutSize ) is.
-				card::Shade( f.uniforms, f.a, f.b, x - bounds.x1, y - bounds.y1, out );
+				const int px = x - bounds.x1;
+				const int py = y - bounds.y1;
+				if( f.strength >= 1.0f )
+					card::Shade( f.uniforms, f.a, f.b, px, py, out );
+				else if( f.strength <= 0.0f )
+					card::Plain( f.uniforms, *f.plain, px, py, out );
+				else
+				{
+					//The end ramp: a crossfade between the plain clip and
+					//the card, premultiplied.
+					float lensed[ 4 ], plainPx[ 4 ];
+					card::Shade( f.uniforms, f.a, f.b, px, py, lensed );
+					card::Plain( f.uniforms, *f.plain, px, py, plainPx );
+					for( int c = 0; c < 4; ++c )
+						out[ c ] = plainPx[ c ] * ( 1.0f - f.strength ) + lensed[ c ] * f.strength;
+				}
 
 				const float alpha = out[ 3 ];
 				for( int c = 0; c < 3; ++c )
@@ -353,6 +405,8 @@ public:
 		toClip   = fetchClip( kOfxImageEffectTransitionSourceToClipName );
 
 		transition      = fetchDoubleParam( kOfxImageEffectTransitionParamName );
+		ends            = fetchChoiceParam( kParamEnds );
+		endLength       = fetchDoubleParam( kParamEndLength );
 		squeeze         = fetchBooleanParam( kParamSqueeze );
 		interleavePitch = fetchDoubleParam( kParamInterleavePitch );
 		bleed           = fetchDoubleParam( kParamBleed );
@@ -390,15 +444,25 @@ public:
 		//Every parameter at this frame's time, once, on this thread. Nothing
 		//is read during the pixel loop and nothing is kept for the next frame.
 		const card::HostValues values = valuesAt( args.time );
+		const float strength          = strengthAt( args.time, values.opacity );
+		OFX::Image* plainImage        = values.opacity < 0.5f ? from.get() : to.get();
+
+		//At the very ends under Fade the picture is the plain clip. Copied in
+		//its own format when it can be, so it is the clip byte for byte; a
+		//host that asked isIdentity first never gets here.
+		if( strength <= 0.0f && copyIfSameFormat( plainImage, dst.get(), args.renderWindow ) )
+			return;
 
 		Frame frame;
 		frame.uniforms = card::UniformsFor( card::SetupFor( values ), outW, outH );
+		frame.strength = strength;
 
 		Plane planeA, planeB;
 		gather( from.get(), planeA );
 		gather( to.get(), planeB );
-		frame.a = card::MakeTexture( planeA.rgba.data(), planeA.width, planeA.height );
-		frame.b = card::MakeTexture( planeB.rgba.data(), planeB.width, planeB.height );
+		frame.a     = card::MakeTexture( planeA.rgba.data(), planeA.width, planeA.height );
+		frame.b     = card::MakeTexture( planeB.rgba.data(), planeB.width, planeB.height );
+		frame.plain = values.opacity < 0.5f ? &frame.a : &frame.b;
 
 		frame.premultipliedOut = comps != OFX::ePixelComponentRGBA || dst->getPreMultiplication() != OFX::eImageUnPreMultiplied;
 
@@ -422,6 +486,18 @@ public:
 		}
 	}
 
+	/// Under Fade, Transition 0 is SourceFrom and 1 is SourceTo, exactly:
+	/// say so, and a host may hand the clip on without rendering.
+	bool isIdentity( const OFX::IsIdentityArguments& args, OFX::Clip*& identityClip, double& identityTime ) override
+	{
+		const float t = static_cast< float >( transition->getValueAtTime( args.time ) );
+		if( strengthAt( args.time, t ) > 0.0f )
+			return false;
+		identityClip = t < 0.5f ? fromClip : toClip;
+		identityTime = args.time;
+		return true;
+	}
+
 	void changedParam( const OFX::InstanceChangedArgs& args, const std::string& paramName ) override
 	{
 		// The About links open a browser and change nothing about the render.
@@ -438,6 +514,50 @@ private:
 		processor.setFrame( &frame );
 		processor.setRenderWindow( args.renderWindow );
 		processor.process();
+	}
+
+	/// How much of the card is seen at time t, for a Transition value read at
+	/// that time. See card::CardStrength.
+	float strengthAt( double t, float transitionValue ) const
+	{
+		int option = kEndsFade;
+		ends->getValueAtTime( t, option );
+		const float length = static_cast< float >( endLength->getValueAtTime( t ) );
+		return card::CardStrength( transitionValue, option == kEndsFade, length );
+	}
+
+	/// The plain clip into the output, pixel for pixel in its own format, when
+	/// it has the output's bounds, depth and components. False when it does
+	/// not, and the caller renders it through card::Plain instead.
+	static bool copyIfSameFormat( OFX::Image* src, OFX::Image* dst, const OfxRectI& window )
+	{
+		if( src == nullptr || dst == nullptr )
+			return false;
+		const OfxRectI sb = src->getBounds();
+		const OfxRectI db = dst->getBounds();
+		if( sb.x1 != db.x1 || sb.y1 != db.y1 || sb.x2 != db.x2 || sb.y2 != db.y2 || src->getPixelDepth() != dst->getPixelDepth()
+		    || src->getPixelComponents() != dst->getPixelComponents() || src->getPreMultiplication() != dst->getPreMultiplication() )
+			return false;
+
+		const int components = dst->getPixelComponents() == OFX::ePixelComponentRGBA ? 4 : 3;
+		size_t bytes         = 0;
+		switch( dst->getPixelDepth() )
+		{
+		case OFX::eBitDepthUByte: bytes = 1; break;
+		case OFX::eBitDepthUShort: bytes = 2; break;
+		case OFX::eBitDepthFloat: bytes = 4; break;
+		default: return false;
+		}
+		const size_t rowBytes = static_cast< size_t >( window.x2 - window.x1 ) * static_cast< size_t >( components ) * bytes;
+		for( int y = window.y1; y < window.y2; ++y )
+		{
+			const void* from = src->getPixelAddress( window.x1, y );
+			void* to         = dst->getPixelAddress( window.x1, y );
+			if( from == nullptr || to == nullptr )
+				return false;
+			std::memcpy( to, from, rowBytes );
+		}
+		return true;
 	}
 
 	/// The FFGL build's 0..1 host values, from this host's parameters at time
@@ -467,6 +587,8 @@ private:
 	OFX::Clip* toClip   = nullptr;
 
 	OFX::DoubleParam* transition      = nullptr;
+	OFX::ChoiceParam* ends            = nullptr;
+	OFX::DoubleParam* endLength       = nullptr;
 	OFX::BooleanParam* squeeze        = nullptr;
 	OFX::DoubleParam* interleavePitch = nullptr;
 	OFX::DoubleParam* bleed           = nullptr;
@@ -616,6 +738,36 @@ void LenticularPluginFactory::describeInContext( OFX::ImageEffectDescriptor& des
 	              defaults.ridgeShine );
 	defineSlider( desc, page, view, kParamLightAngle, "Light Angle",
 	              "Where the light is, -60 to +60 degrees from the card's normal.", defaults.lightAngle );
+
+	//------------------------------------------------------------------- Ends
+	// OpenFX only, and after everything the FFGL build has.
+	OFX::GroupParamDescriptor* endsGroup = defineGroup( desc, page, "Ends" );
+
+	OFX::ChoiceParamDescriptor* endsParam = desc.defineChoiceParam( kParamEnds );
+	endsParam->setLabels( "Ends", "Ends", "Ends" );
+	endsParam->setHint( "Fade: the transition starts on exactly the outgoing clip and finishes on exactly the "
+	                    "incoming one, fading the card in over the first End Length and out over the last. "
+	                    "Cut: the card from the first frame to the last, cutting to it and away from it, as "
+	                    "the Resolume build does." );
+	endsParam->appendOption( "Fade" );//kEndsFade, 0
+	endsParam->appendOption( "Cut" );//kEndsCut, 1
+	endsParam->setDefault( kEndsFade );
+	endsParam->setAnimates( false );
+	endsParam->setParent( *endsGroup );
+	page->addChild( *endsParam );
+
+	OFX::DoubleParamDescriptor* lengthParam = desc.defineDoubleParam( kParamEndLength );
+	lengthParam->setLabels( "End Length", "End Length", "End Length" );
+	lengthParam->setHint( "How long each end's fade lasts, as a fraction of the transition: 0.15 is the first and "
+	                      "the last 15%. Up to 0.5, where the two meet in the middle. Ignored under Cut." );
+	lengthParam->setRange( 0.0, static_cast< double >( card::kEndLengthMax ) );
+	lengthParam->setDisplayRange( 0.0, static_cast< double >( card::kEndLengthMax ) );
+	lengthParam->setDefault( static_cast< double >( card::kEndLengthDefault ) );
+	lengthParam->setIncrement( 0.01 );
+	lengthParam->setDoubleType( OFX::eDoubleTypePlain );
+	lengthParam->setAnimates( false );
+	lengthParam->setParent( *endsGroup );
+	page->addChild( *lengthParam );
 
 	// The Stoatworks About block: a read-only credit line and one push button per
 	// link, in a group that starts folded. Last, so it sits under the effect's

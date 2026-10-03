@@ -16,7 +16,9 @@
       inline there; it lives here so the CPU twin below is handed the same
       floats bit for bit, not a second transcription of them.
     - **The OpenFX plugin** (`ofx/LenticularOFX.cpp`): the same two, then
-      `Shade` for every output pixel. That file does marshalling only.
+      `Shade` for every output pixel -- and, at the two ends of a transition,
+      `CardStrength` and `Plain` (OpenFX only, below). That file does
+      marshalling only.
     - **`lntest --cpu`**: `Shade` against the real FFGL plugin's GPU render of
       the same two inputs, per pixel, at several fader positions and
       settings, with negative controls.
@@ -140,5 +142,38 @@ void Shade( const Uniforms& uniforms, const Texture& a, const Texture& b, int px
 /// `Shade` over output rows [ rowBegin, rowEnd ), into `out`, which is
 /// outW x outH RGBA float, row 0 at the bottom.
 void Render( const Uniforms& uniforms, const Texture& a, const Texture& b, float* out, int rowBegin, int rowEnd );
+
+//---------------------------------------------------------------------------
+// The ends: OpenFX only, and NOT mirrored -- the FFGL build has no ends and
+// no GLSL twin of any of this.
+//
+// A Resolume transition can pop from the plain clip to the card and back;
+// an NLE transition that did would read as a glitch on the timeline. So the
+// OpenFX build fades the card in over the first End Length of the transition
+// and out over the last (Ends = Fade, the default): a crossfade, in
+// premultiplied colour, between the plain picture -- SourceFrom in the first
+// half, SourceTo in the second -- and the card, whose own tilt runs
+// throughout exactly as it does without the fade. Ends = Cut is the card
+// alone at every Transition value, which is the FFGL behaviour and the
+// OpenFX build's output before the ends existed, bit for bit.
+//---------------------------------------------------------------------------
+
+/// End Length: the fraction of the transition each end ramp lasts.
+inline constexpr float kEndLengthDefault = 0.15f;
+inline constexpr float kEndLengthMax     = 0.5f;
+
+/// How much of the card is seen at this Transition value, 0..1. Cut: 1
+/// always. Fade: smoothstep over the first and the last `endLength` of the
+/// transition -- exactly 0 at Transition 0 and 1 (so the picture there is
+/// exactly the plain clip), exactly 1 from `endLength` to 1 - `endLength`,
+/// with zero slope at both ends of each ramp, so there is no kink. An End
+/// Length of 0 is the card everywhere but at exactly 0 and 1.
+float CardStrength( float transition, bool fade, float endLength );
+
+/// The picture with no lens at output pixel (px, py): the input's own texel
+/// when the input is the output's size -- exactly, not a filtered fetch that
+/// happens to land on it -- and otherwise the clamped GL_LINEAR fetch at the
+/// pixel's centre, as an input of another size is stretched over the card.
+void Plain( const Uniforms& uniforms, const Texture& texture, int px, int py, float out[ 4 ] );
 
 } // namespace lenticular::card

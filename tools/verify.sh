@@ -20,8 +20,9 @@
 #                 geometry gives, a pitch mismatch bands at the moire period
 #                 by FFT, a near viewer's flip sweeps across as D sin T,
 #                 Opacity tilts the card monotonically, one character
-#                 of GLSL mutated, and the OpenFX build's CPU twin of the
-#                 shader against the GPU per pixel (--cpu)
+#                 of GLSL mutated, the OpenFX build's CPU twin of the
+#                 shader against the GPU per pixel (--cpu), and the OpenFX
+#                 build's end ramp (--fade, no GL)
 #   software      the same suites on Apple's software renderer, which is
 #                 what a GPU-less CI runner gets: a check calibrated on this
 #                 Mac's GPU fails here before it fails in CI
@@ -193,7 +194,7 @@ else
 fi
 
 LNTEST="$BUILD/lntest"
-SUITES="names mixer ends flip moire distance opacity mutation cpu"
+SUITES="names mixer ends flip moire distance opacity mutation cpu fade"
 
 step "suites"
 for t in $SUITES; do
@@ -212,6 +213,7 @@ step "software renderer"
 if [ "$(uname)" = "Darwin" ]; then
 	for t in $SUITES; do
 		[ "$t" = names ] && continue
+		[ "$t" = fade ] && continue
 		if LNTEST_RENDERER=software "$LNTEST" --$t >/dev/null 2>&1; then
 			pass "lntest --$t (software)"
 		else
@@ -446,11 +448,20 @@ if [ "$(uname)" = "Darwin" ]; then
 			# plugin's GPU render of the same pictures (lntest --pipe):
 			# the comparison --cpu makes, with a real host in the middle.
 			# Opaque cards, so the 8-bit RGB the host's PPM carries is the
-			# whole picture. Tolerance 4 codes: --cpu's derived bound at
-			# these settings (the filter's 8-bit weights on a full-scale
-			# step, 2.0 codes, the ridge at Shine 0.3, 1.4, and float)
-			# rounded up to whole codes. The control -- the host at 0.47
-			# against the GPU at 0.53 -- must miss it.
+			# whole picture.
+			#
+			#   Ends = Cut, the FFGL behaviour, against the GPU. Tolerance
+			#     4 codes: --cpu's derived bound at these settings (the
+			#     filter's 8-bit weights on a full-scale step, 2.0 codes,
+			#     the ridge at Shine 0.3, 1.4, and float) rounded up to
+			#     whole codes. The control -- the host at 0.47 against the
+			#     GPU at 0.53 -- must miss it.
+			#   Ends = Fade, the default: Transition 0 is SourceFrom and 1
+			#     is SourceTo byte for byte, rendered and through
+			#     isIdentity; mid-ramp the picture is ( 1 - s ) plain + s
+			#     card within the same 4 codes (the card's bound scaled by
+			#     s < 1, plus the composite's rounding); between the ramps
+			#     it is the Cut render's bytes.
 			help=$("$OFXPROBE" --help 2>&1)
 			case "$help" in
 				*"--context"*)
@@ -490,7 +501,7 @@ def host(t, sets):
 	cmd = [probe, "--no-system-dirs", "--dir", build, "--render", "com.stoatworks.lenticular", "--context", "transition",
 	       "--from", os.path.join(tmp, "a.ppm"), "--to", os.path.join(tmp, "b.ppm"), "--transition", str(t), "--out-only", out]
 	for s in sets:
-		cmd += ["--set", s]
+		cmd += ["--set", s] if s != "--identity" else [s]
 	r = subprocess.run(cmd, capture_output=True, text=True)
 	# The instance must come from THIS build, not an installed copy.
 	where = [l.split("instance from ", 1)[1].rsplit(" (", 1)[0] for l in r.stdout.splitlines() if "instance from " in l]
@@ -511,20 +522,42 @@ def diff(a, b):
 	return worst, px
 TOL = 4
 bad = 0
+CUT = ["ends=1"]
 cases = [(0, [], []), (0.47, [], []), (1, [], []),
          (0.4, ["lensPitch=0.6", "interleavePitch=0.58"], ["Lens Pitch=0.6", "Interleave Pitch=0.58"]),
          (0.55, ["squeeze=0", "distance=0.5", "ridgeShine=0"], ["Squeeze=0", "Distance=0.5", "Ridge Shine=0"])]
 for t, ofx, ffgl in cases:
-	w, px = diff(host(t, ofx), gpu(t, ffgl))
-	print("Transition %-4s %-40s worst %d of 255, %d of %d px differ" % (t, " ".join(ofx) or "defaults", w, px, W * H))
+	w, px = diff(host(t, CUT + ofx), gpu(t, ffgl))
+	print("Cut  Transition %-4s %-40s worst %d of 255, %d of %d px differ" % (t, " ".join(ofx) or "defaults", w, px, W * H))
 	bad += w > TOL
-w, px = diff(host(0.47, []), gpu(0.53, []))
+w, px = diff(host(0.47, CUT), gpu(0.53, []))
 print("control: the host at 0.47 against the GPU at 0.53: worst %d of 255, %d px differ" % (w, px))
 bad += w <= TOL
+# Fade, the default. The ends are the clips, byte for byte.
+for t, k in ((0, "a"), (1, "b")):
+	for how in ([], ["--identity"]):
+		same = host(t, how) == cards[k]
+		print("Fade Transition %s %-12s is %s: %s" % (t, " ".join(how) or "rendered", "SourceFrom" if k == "a" else "SourceTo", "byte-identical" if same else "DIFFERS"))
+		bad += not same
+# Mid-ramp: ( 1 - s ) plain + s card, s the smoothstep of End Length 0.15.
+def strength(t, L=0.15):
+	e = min(t, 1 - t)
+	x = e / L
+	return 1.0 if e >= L else x * x * (3 - 2 * x)
+for t, k in ((0.06, "a"), (0.95, "b")):
+	s = strength(t)
+	got, card_ = host(t, []), gpu(t, [])
+	want = bytes(int(round((1 - s) * p + s * c)) for p, c in zip(cards[k], card_))
+	w, px = diff(got, want)
+	print("Fade Transition %-4s s %.3f: worst %d of 255 from (1 - s) plain + s card, %d px differ" % (t, s, w, px))
+	bad += w > TOL
+same = host(0.47, []) == host(0.47, CUT)
+print("Fade Transition 0.47, between the ramps: %s the Cut render" % ("byte-identical to" if same else "DIFFERS from"))
+bad += not same
 sys.exit(1 if bad else 0)
 OFXRENDER_PY
 					then
-						pass "renders as a Transition in a real OFX host, within 4 codes of the GPU ($( grep -c '^Transition' "$LOGS/ofxrender.txt" ) settings, control rejected)"
+						pass "renders as a Transition in a real OFX host: Cut within 4 codes of the GPU ($( grep -c '^Cut' "$LOGS/ofxrender.txt" ) settings, control rejected); Fade's ends byte-identical to the clips, its ramp the crossfade"
 					else
 						sed 's/^/   /' "$LOGS/ofxrender.txt"
 						fail "the OpenFX transition rendered through $OFXPROBE disagrees with the GPU"

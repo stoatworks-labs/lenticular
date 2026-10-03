@@ -19,6 +19,7 @@
         lntest --opacity                Opacity tilts the card monotonically from -max to +max
         lntest --mutation               one character of the shipped GLSL fails a check
         lntest --cpu                    the OpenFX build's CPU twin of the shader matches the GPU
+        lntest --fade                   the OpenFX build's ends: the clips exactly at 0 and 1, no kink
         lntest --bench                  ms/frame at 720p through 4K
         lntest --pipe                   raw frames in, raw frames out (two inputs)
 
@@ -2259,6 +2260,96 @@ int runCpu()
 }
 
 //---------------------------------------------------------------------------
+// --fade: the OpenFX build's ends, host-free. No GL: card::CardStrength and
+// card::Plain have no GLSL twin. The crossfade itself is checked through an
+// OpenFX host (verify.sh's openfx step, AGENTS.md "The OpenFX build").
+//---------------------------------------------------------------------------
+int runFade()
+{
+	std::printf( "the OpenFX build's ends: Fade starts on exactly SourceFrom, ends on exactly SourceTo, without a kink\n\n" );
+	const float L = card::kEndLengthDefault;
+
+	//Cut is the card at every Transition value.
+	bool cutAll = true;
+	for( int i = 0; i <= 1000; ++i )
+		cutAll = cutAll && card::CardStrength( static_cast< float >( i ) / 1000.0f, false, L ) == 1.0f;
+	Check( cutAll, "Cut: the card's strength is exactly 1 at 1001 Transition values from 0 to 1" );
+
+	//Fade: exactly 0 at the ends, exactly 1 between the ramps.
+	Check( card::CardStrength( 0.0f, true, L ) == 0.0f && card::CardStrength( 1.0f, true, L ) == 0.0f,
+	       "Fade: exactly 0 at Transition 0 and 1 -- the plain clip" );
+	bool middle = true;
+	for( int i = 0; i <= 1000; ++i )
+	{
+		const float t = L + ( 1.0f - 2.0f * L ) * static_cast< float >( i ) / 1000.0f;
+		middle        = middle && card::CardStrength( t, true, L ) == 1.0f;
+	}
+	Check( middle, fmt( "Fade: exactly 1 -- the card alone -- at 1001 values from %.2f to %.2f", L, 1.0 - L ) );
+
+	//Monotone up the first ramp and down the last, and no kink: the slope
+	//is 0 at both ends of each ramp, so a step d from either end moves the
+	//strength by at most 3 (d / L)^2, where a linear ramp would move it by
+	//d / L.
+	bool upOk = true, downOk = true;
+	float prevUp = -1.0f, prevDown = 2.0f;
+	for( int i = 0; i <= 1000; ++i )
+	{
+		const float t  = L * static_cast< float >( i ) / 1000.0f;
+		const float up = card::CardStrength( t, true, L );
+		const float dn = card::CardStrength( 1.0f - L + L * static_cast< float >( i ) / 1000.0f, true, L );
+		upOk           = upOk && up >= prevUp && up >= 0.0f && up <= 1.0f;
+		downOk         = downOk && dn <= prevDown && dn >= 0.0f && dn <= 1.0f;
+		prevUp         = up;
+		prevDown       = dn;
+	}
+	Check( upOk && downOk, "Fade: rises monotonically over the first End Length and falls over the last, within 0..1" );
+	const double d     = 1e-3;
+	const double flat  = 3.0 * ( d / L ) * ( d / L ) + 1e-6;
+	const double atIn  = card::CardStrength( static_cast< float >( d ), true, L );
+	const double atMid = 1.0 - card::CardStrength( static_cast< float >( L - d ), true, L );
+	const double atOut = card::CardStrength( static_cast< float >( 1.0 - d ), true, L );
+	Check( atIn <= flat && atMid <= flat && atOut <= flat,
+	       fmt( "Fade: no kink -- a step of %.0e from the ends of the ramps moves the strength %.1e, %.1e, %.1e", d, atIn, atMid, atOut )
+	           + fmt( " (smooth: at most %.1e; linear: %.1e)", flat, d / L ) );
+	Check( card::CardStrength( 0.0f, true, 0.0f ) == 0.0f && card::CardStrength( 1.0f, true, 0.0f ) == 0.0f
+	           && card::CardStrength( 1e-6f, true, 0.0f ) == 1.0f && card::CardStrength( 0.5f, true, 0.5f ) == 1.0f,
+	       "End Length 0: the card everywhere but exactly 0 and 1; End Length 0.5: the two ramps meet at 0.5" );
+
+	//The plain picture is the input, texel for texel, when it is the
+	//output's size -- not a filtered fetch that lands near it.
+	const int W = 97, H = 31;
+	std::vector< float > px( static_cast< size_t >( W ) * H * 4 );
+	for( size_t i = 0; i < px.size(); ++i )
+		px[ i ] = static_cast< float >( hash32( static_cast< uint32_t >( i ) ) ) / 4294967296.0f;
+	const card::Texture tex = card::MakeTexture( px.data(), W, H );
+	card::Uniforms u;
+	u.outW       = W;
+	u.outH       = H;
+	long wrong   = 0;
+	for( int y = 0; y < H; ++y )
+		for( int x = 0; x < W; ++x )
+		{
+			float out[ 4 ];
+			card::Plain( u, tex, x, y, out );
+			if( std::memcmp( out, &px[ ( static_cast< size_t >( y ) * W + static_cast< size_t >( x ) ) * 4 ], sizeof( out ) ) != 0 )
+				++wrong;
+		}
+	Check( wrong == 0, fmt( "Plain: an input the output's size comes back bit for bit (%.0f of %.0f pixels differ)", wrong, W * H ) );
+	//And through 8 bits and back, as the OpenFX build's gather and scatter
+	//take it: every code survives.
+	int lost = 0;
+	for( int v = 0; v < 256; ++v )
+		if( std::lround( std::min( std::max( static_cast< float >( v ) / 255.0f, 0.0f ), 1.0f ) * 255.0f ) != v )
+			++lost;
+	Check( lost == 0, fmt( "every 8-bit code survives the float round trip (%.0f lost)", lost ) );
+
+	//Negative control: a ramp that is linear, not smooth, fails the kink check.
+	const double linear = d / L;
+	Negative( linear > flat, fmt( "a linear ramp (%.1e at the same step) fails the kink check", linear ) );
+	return failures == 0 ? 0 : 1;
+}
+
+//---------------------------------------------------------------------------
 // --bench
 //---------------------------------------------------------------------------
 double benchAt( int width, int height, int frames, bool moire )
@@ -2594,6 +2685,7 @@ void usage()
 		"  --opacity         Opacity drives the tilt monotonically from -max to +max\n"
 		"  --mutation        one character of the shipped GLSL fails --flip\n"
 		"  --cpu             the OpenFX build's CPU twin of the shader matches the GPU, per pixel\n"
+		"  --fade            the OpenFX build's ends: exactly the clips at 0 and 1, a smooth ramp between\n"
 		"  --bench           time ProcessOpenGL at 720p through 4K\n"
 		"  --pipe            raw RGBA Dest (A) frames on stdin, raw RGBA frames on stdout\n"
 		"  --pipe-src PATH   raw RGBA Src (B) frames for --pipe (a file or FIFO); default: --input-b, held\n"
@@ -2679,7 +2771,7 @@ int main( int argc, char** argv )
 			}
 		}
 		else if( argument == "--names" || argument == "--mixer" || argument == "--ends" || argument == "--flip" || argument == "--moire"
-		         || argument == "--distance" || argument == "--opacity" || argument == "--mutation" || argument == "--cpu" )
+		         || argument == "--distance" || argument == "--opacity" || argument == "--mutation" || argument == "--cpu" || argument == "--fade" )
 			check = argument;
 		else
 		{
@@ -2693,6 +2785,8 @@ int main( int argc, char** argv )
 		return runList();
 	if( check == "--names" )
 		return runNames();
+	if( check == "--fade" )
+		return runFade();
 
 	if( !cardPath.empty() )
 	{
