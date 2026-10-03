@@ -3,8 +3,10 @@ name: ci
 # Both platforms on every push and pull request, so a Dependabot bump has a
 # status check to gate on and a GLEW-shaped break -- which macOS is
 # structurally blind to, because macOS never links GLEW -- is caught before a
-# tag. There is no Linux job: the CMakeLists branches on APPLE and WIN32, and
-# Resolume has no Linux build.
+# tag. Both build the FFGL plugin AND the OpenFX transition (BUILD_OFX is on
+# by default). There is no Linux job here: Resolume has no Linux build, and
+# the Linux OpenFX build and its Rocky 8 load test are release.yml's
+# linux-ofx and linux-load, which a dispatch of that workflow runs.
 on:
   push:
     branches: [main]
@@ -50,6 +52,24 @@ jobs:
         # would fail here fails there first.
         run: ctest --test-dir build --output-on-failure
 
+      - name: The OpenFX bundle
+        # The release job's checks, here where a pull request sees them: the
+        # plist names the binary that is on disk (or codesign fails after the
+        # tag, naming a "subcomponent" and never the plist), the bundle
+        # exports OfxGetPlugin, and it ad-hoc signs. The per-pixel claim --
+        # the CPU twin against the GPU -- is `lntest --cpu`, in the suites.
+        run: |
+          b=build/Lenticular.ofx.bundle
+          exe=$( /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$b/Contents/Info.plist" )
+          test -f "$b/Contents/MacOS/$exe"
+          __symbols=$( nm -gU "$b/Contents/MacOS/$exe" )
+          case "$__symbols" in
+            *_OfxGetPlugin*) ;;
+            *) echo "expected _OfxGetPlugin"; exit 1 ;;
+          esac
+          cp -R "$b" "$RUNNER_TEMP/"
+          codesign --force --sign - --timestamp=none "$RUNNER_TEMP/Lenticular.ofx.bundle"
+
       - name: Controls
         # At 320x180, because the runner has no GPU and the question is only
         # whether a control changed ANY subpixel. Two at a time on a
@@ -90,8 +110,14 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
+      - name: The OpenFX binary is where the bundle layout puts it
+        shell: bash
+        run: test -f build/Lenticular.ofx.bundle/Contents/Win64/Lenticular.ofx
+
       - uses: actions/upload-artifact@v7
         with:
           name: lenticular-windows-x86_64
-          path: build/Release/*.dll
+          path: |
+            build/Release/*.dll
+            build/Lenticular.ofx.bundle/Contents/Win64/*.ofx
           if-no-files-found: error

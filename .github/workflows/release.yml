@@ -6,16 +6,23 @@ name: release
 # Each ships as a zip. This one is a MIXER, not an effect, but it still goes
 # in Resolume's "Extra Effects" folder: Resolume has no other FFGL folder
 # (measured on genlock, wipe and relay).
+#
+# And the OpenFX build of the same card, an OFX *Transition*, for Resolve,
+# Vegas and other hosts with a Transition context -- macOS universal, Win64
+# and Linux x86-64 -- which ships as its OWN zip per platform rather than
+# folded into the FFGL artefact: it installs to the system's OFX folder, not
+# to Resolume's, and mixing them means half the files in a download go
+# somewhere the operator was not told about. Asset names carry `-ofx-`, which
+# is how the website's download table labels them.
+#
 # Trigger manually (Actions > release > Run workflow) or by pushing a
 # v* tag.
 #
-# Dispatching this manually is the cheap way to test an FFGL build without
+# Dispatching this manually is the cheap way to test the builds without
 # publishing anything: the release job below is gated on refs/tags/v*, so a
-# workflow_dispatch run builds both platforms and skips publication. That is
+# workflow_dispatch run builds every platform and skips publication. That is
 # also the only thing standing between "the code uses nothing
-# platform-specific" and actually knowing Windows compiles.
-#
-# NOTE: this workflow has never run. The repo has no remote and no tag.
+# platform-specific" and actually knowing Windows and Linux compile.
 on:
   workflow_dispatch:
   push:
@@ -111,7 +118,40 @@ jobs:
           else
             cp "build/Release/Lenticular.dll" "out/Lenticular.dll"
           fi
+
+          # OpenFX build: its own zip, for the reason in the header comment.
+          mkdir -p ofxout
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cp -R "build/Lenticular.ofx.bundle" "ofxout/Lenticular.ofx.bundle"
+
+            __archs=$( lipo -archs "ofxout/Lenticular.ofx.bundle/Contents/MacOS/Lenticular.ofx" )
+            echo "OpenFX architectures: $__archs"
+            case "$__archs" in
+              *x86_64*) ;;
+              *) echo "expected x86_64, got: $__archs"; exit 1 ;;
+            esac
+            case "$__archs" in
+              *arm64*) ;;
+              *) echo "expected arm64, got: $__archs"; exit 1 ;;
+            esac
+
+            __symbols=$( nm -gU "ofxout/Lenticular.ofx.bundle/Contents/MacOS/Lenticular.ofx" )
+            case "$__symbols" in
+              *_OfxGetPlugin*) ;;
+              *) echo "expected _OfxGetPlugin"; exit 1 ;;
+            esac
+
+            # Reads Info.plist and refuses if CFBundleExecutable names a file
+            # that is not there -- which is what a plist copied from another
+            # plugin repo does, having passed every build and test first.
+            # tools/verify.sh runs this locally too, so it cannot reach a tag.
+            codesign --force --sign - --timestamp=none "ofxout/Lenticular.ofx.bundle"
+          else
+            mkdir -p "ofxout/Lenticular.ofx.bundle/Contents/Win64"
+            cp "build/Lenticular.ofx.bundle/Contents/Win64/Lenticular.ofx" "ofxout/Lenticular.ofx.bundle/Contents/Win64/Lenticular.ofx"
+          fi
           ls -R out
+          ls -R ofxout
 
       - name: Archive (zip)
         shell: bash
@@ -121,6 +161,12 @@ jobs:
             7z a "../lenticular-${{ matrix.name }}.zip" ./*
           else
             zip -r "../lenticular-${{ matrix.name }}.zip" ./*
+          fi
+          cd ../ofxout
+          if command -v 7z >/dev/null 2>&1; then
+            7z a "../lenticular-ofx-${{ matrix.name }}.zip" ./*
+          else
+            zip -r "../lenticular-ofx-${{ matrix.name }}.zip" ./*
           fi
 
       - name: Disk image (macOS)
@@ -190,9 +236,178 @@ jobs:
           path: installers/*
           if-no-files-found: warn
 
+  linux-ofx:
+    name: linux-x86_64 (OpenFX)
+    runs-on: ubuntu-latest
+    # AlmaLinux 8 rather than the ubuntu image, for glibc 2.28 against 2.39.
+    # Resolve's supported Linux is Rocky 8.6, and a plugin linked against a
+    # newer glibc is refused by the loader on the distro Blackmagic actually
+    # ships for -- while anything newer than Rocky 8 loads a 2.28 build
+    # perfectly well. This is the widest target, not a concession.
+    #
+    # There is no FFGL half to this job. Resolume has no Linux build, the FFGL
+    # SDK has no Linux path, and the OpenFX plugin is a CPU render that never
+    # makes a GL call.
+    container: almalinux:8
+    steps:
+      # Ahead of checkout on purpose: actions/checkout shells out to git and
+      # the base image has none. gcc-toolset-13 because the stock gcc 8.5
+      # predates parts of the C++17 library this code uses.
+      - name: Toolchain
+        run: |
+          dnf -y install git cmake zip binutils gcc-toolset-13
+          source /opt/rh/gcc-toolset-13/enable
+          gcc --version
+
+      # No submodules: the FFGL SDK is the only one and this job does not build
+      # FFGL. The OpenFX SDK subset is vendored in-tree.
+      - uses: actions/checkout@v7
+
+      # LENTICULAR_BUILD_FFGL=OFF is what makes the job possible at all. With
+      # it ON, the SDK's own find_package(GLEW REQUIRED) fails at CONFIGURE
+      # time, so the build dies before compiling a line of a plugin that needs
+      # no GL loader.
+      #
+      # Static libstdc++/libgcc because gcc-toolset-13's runtime is not
+      # installed on a stock Rocky or Alma 8 -- a dynamically linked build
+      # would fail to load on precisely the machines this targets.
+      - name: Configure
+        run: |
+          source /opt/rh/gcc-toolset-13/enable
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLENTICULAR_BUILD_FFGL=OFF \
+            -DLENTICULAR_BUILD_TOOLS=OFF \
+            -DCMAKE_CXX_FLAGS="-static-libstdc++ -static-libgcc"
+
+      - name: Build
+        run: |
+          source /opt/rh/gcc-toolset-13/enable
+          cmake --build build --parallel
+
+      - name: Collect artifact
+        run: |
+          so="build/Lenticular.ofx.bundle/Contents/Linux-x86-64/Lenticular.ofx"
+          test -f "$so"
+
+          # `nm ... | grep -q` SIGPIPEs under `bash -eo pipefail` when grep
+          # FINDS its match, failing the release on a correct binary. Captured
+          # and matched with `case` instead, as the macOS job does.
+          __syms=$( nm -D --defined-only "$so" )
+          case "$__syms" in
+            *OfxGetPlugin*) ;;
+            *) echo "expected OfxGetPlugin, got: $__syms"; exit 1 ;;
+          esac
+
+          # The whole reason for the container, asserted rather than assumed:
+          # the highest glibc symbol version the binary asks for must not be
+          # newer than Rocky 8's 2.28. Building in the right image is easy to
+          # get right and impossible to notice getting wrong.
+          __glibc=$( objdump -T "$so" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 )
+          echo "highest glibc requirement: $__glibc"
+          if [ "$( printf '%s\nGLIBC_2.28\n' "$__glibc" | sort -uV | tail -1 )" != "GLIBC_2.28" ]; then
+            echo "$__glibc is newer than Rocky 8 provides"; exit 1
+          fi
+          readelf -d "$so" | grep NEEDED
+
+          mkdir -p "ofxout/Lenticular.ofx.bundle/Contents/Linux-x86-64"
+          cp "$so" "ofxout/Lenticular.ofx.bundle/Contents/Linux-x86-64/Lenticular.ofx"
+          ls -R ofxout
+
+      - name: Archive (zip)
+        run: |
+          cd ofxout
+          zip -r "../lenticular-ofx-linux-x86_64.zip" ./*
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lenticular-linux-x86_64
+          path: "*.zip"
+          if-no-files-found: error
+
+  linux-load:
+    name: linux-x86_64 (load test)
+    needs: linux-ofx
+    runs-on: ubuntu-latest
+    # Rocky 8 and not the AlmaLinux 8 that built it: the claim being tested is
+    # "this loads on the distro Resolve supports", and testing it in the image
+    # that produced the binary would only prove the image agrees with itself.
+    #
+    # This is a LOAD test, not a render test. It dlopens the shipped .ofx and
+    # calls the two entry points an OFX host calls first, which runs the OFX
+    # Support library's static initialisers and the factory construction in
+    # getPluginIDs -- the parts that actually fail when an ABI or a glibc floor
+    # is wrong. What it does not do is render a frame or drive a real host;
+    # Resolve is x86_64-only and needs a GPU, so nothing here stands in for
+    # having run the plugin in Resolve.
+    container: rockylinux:8
+    steps:
+      - name: Toolchain
+        run: dnf -y install gcc unzip findutils bash
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: lenticular-linux-x86_64
+          path: art
+
+      - name: Load the plugin and ask it what it is
+        shell: bash
+        run: |
+          unzip -q art/*.zip -d unz
+          so="$( find unz -name '*.ofx' | head -1 )"
+          test -n "$so"
+          echo "testing $so"
+          ldd "$so" || true
+
+          cat > probe.c <<'EOF'
+          #include <dlfcn.h>
+          #include <stdio.h>
+          #include <string.h>
+
+          /* The head of OfxPlugin from ofxCore.h, which is all this needs. */
+          typedef struct {
+              const char  *pluginApi;
+              int          apiVersion;
+              const char  *pluginIdentifier;
+              unsigned int pluginVersionMajor;
+              unsigned int pluginVersionMinor;
+              void        *setHost;
+              void        *mainEntry;
+          } OfxPluginHead;
+
+          int main( int argc, char **argv )
+          {
+              if( argc < 2 ) { fprintf( stderr, "usage: probe <plugin.ofx>\n" ); return 2; }
+
+              void *h = dlopen( argv[ 1 ], RTLD_NOW | RTLD_LOCAL );
+              if( !h ) { fprintf( stderr, "dlopen: %s\n", dlerror() ); return 1; }
+
+              int            ( *count )( void ) = dlsym( h, "OfxGetNumberOfPlugins" );
+              OfxPluginHead *( *get )( int )    = dlsym( h, "OfxGetPlugin" );
+              if( !count || !get ) { fprintf( stderr, "entry points missing\n" ); return 1; }
+
+              int n = count();
+              printf( "OfxGetNumberOfPlugins -> %d\n", n );
+              if( n < 1 ) { fprintf( stderr, "no plugins in the bundle\n" ); return 1; }
+
+              int found = 0;
+              for( int i = 0; i < n; ++i ) {
+                  OfxPluginHead *p = get( i );
+                  if( !p ) { fprintf( stderr, "OfxGetPlugin(%d) is NULL\n", i ); return 1; }
+                  printf( "  [%d] %s  api=%s v%u.%u\n", i, p->pluginIdentifier,
+                          p->pluginApi, p->pluginVersionMajor, p->pluginVersionMinor );
+                  if( strcmp( p->pluginIdentifier, "com.stoatworks.lenticular" ) == 0 ) found = 1;
+              }
+              if( !found ) { fprintf( stderr, "com.stoatworks.lenticular is not in the bundle\n" ); return 1; }
+              return 0;
+          }
+          EOF
+          gcc -O0 -o probe probe.c -ldl
+          ./probe "$so"
+
   release:
     name: Publish release
-    needs: [build, windows-installer]
+    needs: [build, linux-ofx, linux-load, windows-installer]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
