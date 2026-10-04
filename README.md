@@ -60,15 +60,16 @@ screen, and the two pictures are Resolume's bundled demo media.*
 
 ## Download
 
-**[v0.1.0](https://github.com/stoatworks-labs/lenticular/releases/tag/v0.1.0)** — prebuilt for macOS and Windows. Pick your platform:
+**[v0.2.0](https://github.com/stoatworks-labs/lenticular/releases/tag/v0.2.0)** — prebuilt for macOS, Windows and Linux. Pick your platform:
 
 <details>
 <summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .dmg disk image | [`lenticular-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/lenticular/releases/download/v0.1.0/lenticular-0.1.0-macos-universal.dmg) | 201 KB |
-| Universal (Apple Silicon + Intel) · .zip archive | [`lenticular-macos-universal.zip`](https://github.com/stoatworks-labs/lenticular/releases/latest/download/lenticular-macos-universal.zip) | 164 KB |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`lenticular-0.2.0-macos-universal.dmg`](https://github.com/stoatworks-labs/lenticular/releases/download/v0.2.0/lenticular-0.2.0-macos-universal.dmg) | 212 KB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`lenticular-macos-universal.zip`](https://github.com/stoatworks-labs/lenticular/releases/latest/download/lenticular-macos-universal.zip) | 170 KB |
+| Universal (Apple Silicon + Intel) · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`lenticular-ofx-macos-universal.zip`](https://github.com/stoatworks-labs/lenticular/releases/latest/download/lenticular-ofx-macos-universal.zip) | 238 KB |
 
 </details>
 
@@ -77,8 +78,18 @@ screen, and the two pictures are Resolume's bundled demo media.*
 
 | Build | Download | Size |
 | --- | --- | --- |
-| x64 · .exe installer | [`lenticular-0.1.0-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/lenticular/releases/download/v0.1.0/lenticular-0.1.0-windows-x86_64-setup.exe) | 216 KB |
-| x64 · .zip archive | [`lenticular-windows-x86_64.zip`](https://github.com/stoatworks-labs/lenticular/releases/latest/download/lenticular-windows-x86_64.zip) | 108 KB |
+| x64 · .exe installer | [`lenticular-0.2.0-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/lenticular/releases/download/v0.2.0/lenticular-0.2.0-windows-x86_64-setup.exe) | 221 KB |
+| x64 · .zip archive | [`lenticular-windows-x86_64.zip`](https://github.com/stoatworks-labs/lenticular/releases/latest/download/lenticular-windows-x86_64.zip) | 109 KB |
+| x64 · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`lenticular-ofx-windows-x86_64.zip`](https://github.com/stoatworks-labs/lenticular/releases/latest/download/lenticular-ofx-windows-x86_64.zip) | 68 KB |
+
+</details>
+
+<details>
+<summary><b>Linux</b> — x64</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| x64 · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`lenticular-ofx-linux-x86_64.zip`](https://github.com/stoatworks-labs/lenticular/releases/latest/download/lenticular-ofx-linux-x86_64.zip) | 705 KB |
 
 </details>
 
