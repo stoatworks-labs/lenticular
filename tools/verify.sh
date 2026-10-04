@@ -67,6 +67,22 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
+# resolume-ofx-bridge, for ofxprobe. It sits beside this repo's checkout --
+# and from a git worktree `..` is the worktrees folder, not Projects/resolume,
+# so the main checkout is found through git's common dir as well.
+# LENTICULAR_BRIDGE overrides both, and OFXPROBE the probe itself.
+BRIDGE="${LENTICULAR_BRIDGE:-}"
+if [ -z "$BRIDGE" ]; then
+	for candidate in "../resolume-ofx-bridge" \
+	                 "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")/../resolume-ofx-bridge"; do
+		if [ -d "$candidate/build" ]; then
+			BRIDGE="$candidate"
+			break
+		fi
+	done
+fi
+BRIDGE="${BRIDGE:-../resolume-ofx-bridge}"
+
 BUILD="${BUILD:-build-universal}"
 failures=0
 LOGS="$( mktemp -d )"
@@ -424,8 +440,7 @@ if [ "$(uname)" = "Darwin" ]; then
 		# line is expected. What it proves is that the binary loads, its
 		# static initialisers and factory run, and it describes itself under
 		# the identity a saved project will refer to.
-		OFXPROBE="${OFXPROBE:-../resolume-ofx-bridge/build/ofxprobe}"
-		[ -x "$OFXPROBE" ] || OFXPROBE="$HOME/Projects/resolume/resolume-ofx-bridge/build/ofxprobe"
+		OFXPROBE="${OFXPROBE:-$BRIDGE/build/ofxprobe}"
 		if [ -x "$OFXPROBE" ]; then
 			out=$("$OFXPROBE" --dir "$BUILD" 2>&1)
 			case "$out" in
