@@ -6,14 +6,17 @@ into strips and interleaved under a sheet of cylindrical lenses, with the layer'
 opacity fader tilting the card. C++17 + GLSL 4.10, CMake, universal macOS
 `.bundle` and a Windows x64 `.dll`. MIT. Public at
 `github.com/stoatworks-labs/lenticular` (moved from `~/dev/lenticular` to
-`~/Projects/resolume/lenticular` on 2026-09-25), released at v0.1.0, loaded in
+`~/Projects/resolume/lenticular` on 2026-09-25), released at v0.2.0 (v0.1.0 was
+the FFGL mixer alone; v0.2.0 added the OpenFX build), loaded in
 Resolume Arena 7.27.1 on Windows (see "What Lenticular showed in Arena"), never
 on macOS. The fleet's fourth mixer,
 after genlock, wipe and relay. Tranche five, started 2026-09-25; Allan picked the
 idea. Since 2026-10-03 the same card also builds as an **OpenFX Transition**
 (`source/ofx/LenticularOFX.cpp`), one of the fleet's first, rendered on the CPU
 by a C++ twin of the shader — see "The OpenFX build". Rendered through a test
-OFX host with a Transition context; never loaded into Resolve or Vegas.
+OFX host with a Transition context, and in DaVinci Resolve Studio 21.1 on macOS
+on 2026-10-04 (Edit page, byte-identical to that host; see "In DaVinci
+Resolve"); never loaded into Vegas.
 
 `CLAUDE.md` is the command reference. This file is the *why*: the idea, every
 number in the harness and where it comes from, the traps this build actually hit,
@@ -437,10 +440,31 @@ gather and the twin over every row). M4 Max. CI builds the bundle on macOS,
 Windows and Linux (AlmaLinux 8, glibc 2.28 — it asks for 2.27) and dlopens it
 on Rocky 8, which finds `com.stoatworks.lenticular`.
 
-**Not verified:** DaVinci Resolve, Vegas or any production host. How they
-marshal SourceFrom, SourceTo, the Transition parameter, premultiplication,
-render scale and tiles into it has not been seen; nor has a Windows or Linux
-host loaded it.
+**In DaVinci Resolve, 2026-10-04.** An arm64 build of the port (RelWithDebInfo
+with `-DDEBUG`, so the OFX Support library logs) in DaVinci Resolve
+Studio 21.1 on macOS, placed on the Edit page between two opaque 1920×1080
+test cards with the scripting API (`TimelineItem.AddTransition`, category
+`ofx`), 24 frames on a 24 fps timeline, every control at its default, and
+rendered by Resolve to a PNG sequence. The frames before and after the
+transition are the two cards exactly, SourceFrom first. All 24 transition
+frames are **byte-identical** to the test host's renders of the v0.2.0
+universal build (`--depth float`, same two PNGs) at Transition (n + ½) / 24 for
+frame n; against n / 24 they are off by up to 150 of 255. So Resolve's Edit
+page hands frame n of an N-frame transition the middle of its interval and
+never renders Transition 0 or 1, and `isIdentity` at the ends is never asked:
+under Fade the first and last transition frames carry the card at
+CardStrength( ½ / (N · End Length) ) — **0.0525** here, and a least-squares fit
+of Resolve's frames against the Cut render gives 0.0528 and 0.0529 — at most
+**12 of 255** off the plain clip, which follows on the next frame. At
+N = 12 the same formula gives 0.19. Not a fault in the ends (Transition 0 and
+1 are still exact where a host asks for them), but the "starts on exactly
+SourceFrom" claim holds only for a host that renders the ends. Not checked in
+Resolve: premultiplied alpha (the cards are opaque), a proxy render scale,
+clips of another size, and its cost.
+
+**Not verified:** Vegas or any other production host, and the parts of
+Resolve's marshalling listed above. Nor has a Windows or Linux host loaded
+it.
 
 ---
 
@@ -612,10 +636,13 @@ close to what a `glFinish` round trip costs to observe, and 4K came back at 0.03
 - **Vertical lenticules only.** Real cards are also made with horizontal ones
   (flip by tipping, not turning); not a control.
 - **The hero image** is the harness's render, not Resolume's.
-- **The OpenFX transition has never been loaded into Resolve or Vegas.** Its
-  per-pixel stage is measured against the GPU (`--cpu`) and it matched the GPU
-  through a test OFX host with a Transition context; a production host's
-  marshalling is unseen. See "The OpenFX build".
+- **The OpenFX transition has been in one production host**, DaVinci Resolve
+  Studio 21.1 on macOS (Edit page, 2026-10-04): byte-identical to the test OFX
+  host at Transition (n + ½) / N, so under Fade the first and last transition
+  frames keep 5% of the card on a 24-frame transition. Its per-pixel stage is
+  measured against the GPU (`--cpu`) and it matched the GPU through that test
+  host. Never loaded into Vegas, or by a host on Windows or Linux; Resolve with
+  transparent clips or a proxy render scale is unseen. See "The OpenFX build".
 - No presets. The browser demo exists and is a port, not the plugin; see *The
   browser demo* below.
 

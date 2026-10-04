@@ -17,8 +17,10 @@
 > renders with a line-for-line C++ twin of the shader, compared with the GPU
 > per pixel to within **0.65 of 255** a channel here, and in a test OpenFX host
 > that renders transitions it matches the FFGL plugin's GPU render to **1 of
-> 255** — but it has **never been loaded into DaVinci Resolve or Vegas**. Check
-> it in your own rig before trusting it in a show.
+> 255**. In **DaVinci Resolve Studio 21.1** on macOS it plays on the Edit page
+> with the clips the right way round, and Resolve's frames are **byte-identical**
+> to that test host's; it has **never been loaded into Vegas**, nor by any host
+> on Windows or Linux. Check it in your own rig before trusting it in a show.
 
 A printed lenticular sheet that shows one layer or the other, as an FFGL
 **mixer** for [Resolume](https://resolume.com) Arena and Avenue. The layer's
@@ -156,10 +158,10 @@ tilts the card. The mixer's two layers and its fader map one to one:
 | **B**, in the second strip | this layer | **SourceTo**, the incoming clip |
 | **The tilt** | Opacity, the layer's fader | the host's **Transition**, 0 → 1 |
 
-Copy `Lenticular.ofx.bundle` from the `lenticular-ofx-*` zip for your platform
-into the standard OpenFX folder, then restart the host. The zips ship from the
-first release after v0.1.0, which predates the port; until then, build it
-(below).
+The OpenFX build ships from **v0.2.0**, as its own zip per platform:
+`lenticular-ofx-macos-universal.zip`, `lenticular-ofx-windows-x86_64.zip` and
+`lenticular-ofx-linux-x86_64.zip`. Copy `Lenticular.ofx.bundle` from the one
+for your platform into the standard OpenFX folder, then restart the host:
 
 ```
 macOS    /Library/OFX/Plugins/
@@ -199,9 +201,15 @@ What differs from the FFGL build, and why:
   one — a smoothstep crossfade, so there is no kink, with the card's own tilt
   running throughout. At exactly 0 and 1 the plugin tells the host it is the
   clip (`isIdentity`) and, if asked to render anyway, copies the clip's
-  pixels, so the ends are byte-identical to the clips. **Ends = Cut** is the
-  card from the first frame to the last: the Resolume build's behaviour, and
-  this build's output before the ends existed, bit for bit.
+  pixels, so the ends are byte-identical to the clips. Resolve never asks for
+  exactly 0 or 1, though: on its Edit page frame n of an N-frame transition is
+  rendered at Transition (n + ½) / N, so the transition's first and last frames
+  still carry a trace of the card — **5%** of it on a 24-frame transition at the
+  default End Length, at most 12 of 255 off the plain clip, and more on a
+  shorter transition or End Length — and the plain clips are the frames either
+  side. **Ends = Cut** is the card from the first frame to the last: the
+  Resolume build's behaviour, and this build's output before the ends existed,
+  bit for bit.
 - **Squeeze is reachable.** Arena hides a mixer's first parameter, so in
   Resolume Squeeze is always on; an OpenFX host shows every parameter.
 - **Inputs of another size are stretched to the output**, each by its own
@@ -275,9 +283,10 @@ ignored, the lens pitch forced to the print's, the tilt reversed.
 
 ## Status
 
-**v0.1.0, and honestly early.** Verified by measurement on an
-Apple M4 Max, macOS 26.4.1, 2026-09-25, at 640×360 **and** 320×180 unless
-stated, on the GPU and on Apple's software renderer:
+**v0.2.0, which added the OpenFX transition, and honestly early.** Verified by
+measurement on an Apple M4 Max, macOS 26.4.1, 2026-09-25 unless dated, at
+640×360 **and** 320×180 unless stated, on the GPU and on Apple's software
+renderer:
 
 | Check | Result |
 | --- | --- |
@@ -301,6 +310,7 @@ stated, on the GPU and on Apple's software renderer:
 | OpenFX in a host (2026-10-03) | a test CPU host built from the bridge's `ofxprobe` with a Transition context (`--context transition`), driving SourceFrom, SourceTo and Transition, against the FFGL plugin's GPU render of the same premultiplied bytes (`lntest --pipe`), 640×360, inputs with alpha 0, 51 and 255. **Ends = Cut**: Transition 0, 0.25, 0.47, 0.5, 0.75 and 1, moiré, Squeeze off with a near viewer, the ghost, full shine on 16 lenses — worst **1 of 255** in every one, no pixel off by more, and every one **byte-identical** to the bundle from before the ends existed; float buffers the same. The host at 0.47 against the GPU at 0.53 differs by **124 of 255**, and the bundle with SourceFrom and SourceTo swapped by **255**. **Ends = Fade** (the default): Transition 0 is **byte-identical to SourceFrom** and 1 to **SourceTo**, rendered and through `isIdentity`, 8-bit and float; mid-ramp (0.03, 0.06, 0.1, 0.9, 0.95, 0.985) the picture is (1 − s) plain + s card within **1 of 255**; at 0.15, 0.5 and 0.85 it is the Cut render's bytes. The host's Transition keyed 0 → 1 over 24 frames and read at frame 12 renders the same hash as a constant 0.5, and frame 12 after frames 0..11 in one instance is byte-identical to frame 12 alone. `tools/verify.sh` runs a version of all this — five Cut settings against the GPU with the control, Fade's ends, two mid-ramp points — when its `OFXPROBE` can host a Transition, and the bundle from before the ends fails it |
 | OpenFX ends, host-free (`--fade`) | the card's strength is exactly 1 under Cut at 1001 Transition values; under Fade exactly 0 at 0 and 1, exactly 1 at 1001 values from 0.15 to 0.85, monotone over both ramps, and a step of 1e-3 from the end of a ramp moves it 1.3e-4 (a linear ramp would move 6.7e-3); End Length 0 and 0.5 behave; an input the output's size comes back from the plain path bit for bit, and every 8-bit code survives the float round trip |
 | OpenFX CPU cost | **7.1–8.4 ms a 1080p frame** over two 21-frame runs (the first rendered frame 10.3–10.5) in that host, which gives a plugin 8 threads of an M4 Max; under Fade the frames at exactly 0 and 1 are a copy, **0.2 ms**, and the ramp frames cost what the card does; **40 ms** on one thread, timed outside a host |
+| OpenFX in DaVinci Resolve Studio 21.1 (macOS, 2026-10-04) | an arm64 build of the port placed between two opaque 1920×1080 test cards on the Edit page with Resolve's scripting API (`AddTransition`, category `ofx`), 24 frames at the defaults, rendered by Resolve to PNG: the frames before and after it are the two clips exactly, SourceFrom first; all 24 transition frames are **byte-identical** to the test host's renders of the v0.2.0 build at Transition (n + ½) / 24, and not to n / 24 (up to 150 of 255 off). So Resolve never renders Transition 0 or 1: under Fade the first and last transition frames carry the card at strength **0.053** (a least-squares fit to Resolve's frames gives 0.0528 and 0.0529), at most **12 of 255** from the plain clip, and the plain clip follows. Opaque inputs at full resolution, so premultiplication and render scale were not exercised; not timed |
 
 Run `tools/verify.sh` before believing any of it.
 
@@ -318,13 +328,16 @@ shading and the residual magnification are looks, not a model of any sheet; the
 lens is a thin lens in air, with no refraction into the plastic. No presets.
 The browser demo is a port, not the plugin.
 
-**The OpenFX transition has never been loaded into DaVinci Resolve or Vegas.**
-It has rendered transitions in a test host — the fleet's own CPU probe, given a
-Transition context — and matched the GPU there, but how Resolve and Vegas
-marshal SourceFrom, SourceTo, the Transition parameter, premultiplication and
-render scale into it has not been seen, and no GPU-accelerated host has run it.
-CI builds it on macOS, Windows and Linux and dlopens it on Rocky 8; it has never
-been loaded on Windows or Linux by a host.
+**The OpenFX transition has been in one production host: DaVinci Resolve
+Studio 21.1 on macOS**, on the Edit page, where it rendered byte for byte what
+the test host renders, with the clips the right way round (the table above).
+That was one transition at the defaults between opaque cards at full
+resolution, placed with Resolve's scripting API: how Resolve hands it
+premultiplied alpha, a proxy render scale or clips of another size has not been
+seen, and it has not been timed there. Under Fade, Resolve's first and last
+transition frames keep a trace of the card (above). It has **never been loaded
+into Vegas**. CI builds it on macOS, Windows and Linux and dlopens it on Rocky
+8; it has never been loaded on Windows or Linux by a host.
 
 [AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
 measured, the open questions, and the traps.

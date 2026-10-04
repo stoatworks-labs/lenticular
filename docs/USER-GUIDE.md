@@ -21,7 +21,8 @@ captured from Resolume. Each 21-pixel lens shows one sample of whichever picture
 focus lands on; the ridges catch the light as thin stripes; and because the print
 misses the lens, the flip happens in bands about a third of the picture apart.*
 
-> **Before you rely on this:** released at **v0.1.0**, and honestly early. The optics
+> **Before you rely on this:** released at **v0.2.0**, which added the OpenFX
+> transition for Resolve and Vegas, and honestly early. The optics
 > are measured, not just asserted. An offline harness drives the real plugin with two
 > inputs at two different sizes, on the GPU and on Apple's software renderer. Tilted
 > all the way, the card is A or B sampled at the lens pitch, **0 bytes wrong** in all
@@ -34,8 +35,10 @@ misses the lens, the flip happens in bands about a third of the picture apart.*
 > On Windows, a build of v0.1.0 loads in Resolume Arena 7.27.1, is offered as a layer's Blend Mode and as a transition, has its tilt driven by the layer's opacity fader and by a layer transition, and hides only Squeeze, as designed — on software rendering, and no picture of it inside Resolume has been captured, so a correct render there is not yet shown.
 > The OpenFX transition renders with a C++ copy of the plugin's shader, compared with
 > the graphics card's render pixel by pixel to within 0.65 of 255, and in a test
-> OpenFX host it matches the Resolume plugin's picture to 1 of 255 — but it has
-> **never been loaded into Resolve or Vegas**.
+> OpenFX host it matches the Resolume plugin's picture to 1 of 255. In
+> **DaVinci Resolve Studio 21.1** on macOS it plays on the Edit page with the clips
+> the right way round, and Resolve's frames are identical to that test host's. It
+> has **never been loaded into Vegas**, nor into any host on Windows or Linux.
 > **Try it on a spare layer first**, and please report anything that misbehaves.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human
@@ -69,8 +72,9 @@ The Windows builds are not code-signed. Plugin files are not gated the way `.exe
 files are, so Resolume loads them as normal; only the installer trips SmartScreen,
 once: **More info** → **Run anyway**.
 
-**For Resolve or Vegas**, take the `lenticular-ofx-*` zip for your platform instead
-(from the first release after v0.1.0) and copy `Lenticular.ofx.bundle` into the
+**For Resolve or Vegas**, take the OpenFX zip for your platform instead (from
+v0.2.0: `lenticular-ofx-macos-universal.zip`, `lenticular-ofx-windows-x86_64.zip`
+or `lenticular-ofx-linux-x86_64.zip`) and copy `Lenticular.ofx.bundle` into the
 standard OpenFX folder, then restart the host:
 
 ```
@@ -126,7 +130,12 @@ arithmetic and a line-for-line copy of its shader. The differences:
   exactly the outgoing clip and finishes on exactly the incoming one: over the first
   **End Length** of the transition (0.15, so the first 15%, by default; up to 0.5)
   the card fades in from the plain outgoing clip, and over the last it fades out to
-  the plain incoming one, smoothly, while the card keeps tilting. **Ends = Cut**
+  the plain incoming one, smoothly, while the card keeps tilting. Resolve renders
+  each frame of a transition at that frame's middle, never at exactly its start or
+  end, so there the first and last frames of the transition still carry a faint
+  trace of the card — about 5% of it on a 24-frame transition at the default End
+  Length — and the plain clip is the next frame. A longer End Length or a longer
+  transition makes the trace fainter. **Ends = Cut**
   shows the card from the first frame to the last, cutting to it and away from it —
   exactly what Resolume does.
 - **Squeeze is shown.** Resolume hides it; an OpenFX host shows every control.
@@ -338,10 +347,13 @@ failed to compile.
 - **Output alpha is the seen picture's**: the mix of A's and B's alpha by how much of B
   the lens sees, with the ridge highlight laid over it.
 - **No presets.**
-- **The OpenFX transition has never been loaded into Resolve or Vegas.** Its picture
-  is checked pixel by pixel against the Resolume plugin's, on its own and through a
-  test OpenFX host that plays transitions; how Resolve and Vegas hand it the two clips
-  and the progress is not yet checked.
+- **The OpenFX transition has been in one production host**, DaVinci Resolve Studio
+  21.1 on macOS, on the Edit page: the clips the right way round, the frames either
+  side of it the clips exactly, and every frame of it identical to a test OpenFX
+  host's render, which is checked pixel by pixel against the Resolume plugin's. That
+  was opaque clips at full resolution, at the default settings; transparent clips
+  and proxy renders in Resolve are not yet checked. It has **never been loaded into
+  Vegas**, nor into any host on Windows or Linux.
 - **There is a browser demo** at [lenticular-demo.stoatworks-labs.com](https://lenticular-demo.stoatworks-labs.com).
   It is a port to a web page, not the plugin: the shaders run in WebGL2, the
   parameter conversions are rewritten in JavaScript, and the two pictures are

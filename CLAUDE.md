@@ -5,7 +5,8 @@ A printed lenticular sheet that shows one layer or the other, as an FFGL
 `.bundle` (macOS) + Windows x64 `.dll` — and the same card as an **OpenFX
 Transition** (`Lenticular.ofx.bundle`, macOS universal / Win64 / Linux x86-64)
 for Resolve and Vegas, rendered on the CPU. MIT. Public at
-github.com/stoatworks-labs/lenticular, released v0.1.0; loaded in Resolume
+github.com/stoatworks-labs/lenticular, released v0.2.0 (which added the OpenFX
+build); loaded in Resolume
 Arena 7.27.1 on Windows (AGENTS.md, "What Lenticular showed in Arena"), never on
 macOS. The fleet's fourth mixer, after genlock, wipe and relay.
 
@@ -178,10 +179,13 @@ Every numeric check runs at 640x360 and 320x180 (`--mixer` at 320x200 and
 - **Never loaded into Resolume on macOS.** On Windows (Arena 7.27.1, llvmpipe)
   it was probed by REST + its log, and no frame of its picture there has been
   captured.
-- **The OpenFX transition has never been loaded into Resolve or Vegas.** It
-  matches the GPU per pixel on its own (`--cpu`) and through a test OFX host
-  with a Transition context (1 of 255, AGENTS.md "The OpenFX build"); Resolve's
-  and Vegas's marshalling is unseen.
+- **The OpenFX transition has been in Resolve, never in Vegas.** It matches
+  the GPU per pixel on its own (`--cpu`) and through a test OFX host with a
+  Transition context (1 of 255), and DaVinci Resolve Studio 21.1 (macOS, Edit
+  page, 2026-10-04) rendered it byte-identical to that host at Transition
+  (n + ½) / N — so under Fade Resolve's first and last transition frames keep a
+  trace of the card (AGENTS.md "In DaVinci Resolve"). Vegas's marshalling, and
+  any Windows or Linux host, are unseen.
 - No presets. The browser demo exists; it is a port, not the plugin.
 
 ## Diagnostics
