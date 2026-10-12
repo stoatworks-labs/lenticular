@@ -278,7 +278,7 @@ an Apple M4 Max:
 | 1280×720 | 0.021 | 0.1% |
 | 1920×1080 | 0.035 | 0.2% |
 | 2560×1440 | 0.055 | 0.3% |
-| 3840×2160 | 0.114 | 0.7% |
+| 3840×2160 | 0.104 | 0.6% |
 
 At this size the measurement costs about as much as the work, so take the ceiling. No
 timing has been taken inside Resolume.
