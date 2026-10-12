@@ -1,60 +1,52 @@
 # Lenticular
 
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
-> (Anthropic), directed and reviewed by a human author. The optics are not
-> asserted but measured: an offline harness drives the real plugin class in a
-> headless GL context with **two** input textures at two different resolutions
-> and reads each claim back out of the picture — the card tilted all the way is
-> A or B sampled at the lens pitch **bitwise, in all four channels**; the whole
-> card flips square on and flips back at the edge of the viewing zone,
-> atan( 1 / 2F ), to **6e-8 rad**; a pitch mismatch bands at
-> 1 / | 1/p_L − 1/p_P | pixels, measured by FFT to **0.0009 cycles per picture
-> width** in whole and fractional cases; a near viewer's flip lands at D sin T to
-> **0.001 px** (see [Status](#status)). It has **never been loaded into
-> Resolume on macOS**; on Windows, Resolume Arena 7.27.1 loads it and drives its
-> tilt from the layer's fader and from a transition. It is the fleet's fourth
-> FFGL *mixer*, after genlock, wipe and relay. The **OpenFX transition** build
-> renders with a line-for-line C++ twin of the shader, compared with the GPU
-> per pixel to within **0.65 of 255** a channel here, and in a test OpenFX host
-> that renders transitions it matches the FFGL plugin's GPU render to **1 of
-> 255**. In **DaVinci Resolve Studio 21.1** on macOS it plays on the Edit page
-> with the clips the right way round, and Resolve's frames are **byte-identical**
-> to that test host's; it has **never been loaded into Vegas**, nor by any host
-> on Windows or Linux. Check it in your own rig before trusting it in a show.
+> (Anthropic), directed and reviewed by a human author. The optics are measured
+> rather than asserted, by an offline harness that drives the plugin's own class in a
+> headless GL context with **two** input textures at two different resolutions and
+> reads each claim back out of the picture. It's **never been loaded into Resolume on
+> macOS**; on Windows, Resolume Arena 7.27.1 loads it and drives its tilt from the
+> layer's fader and from a transition. The **OpenFX transition** build plays in
+> **DaVinci Resolve Studio 21.1** on macOS, on the Edit page with the clips the right
+> way round, but it's **never been loaded into Vegas**, nor by any host on Windows or
+> Linux. The numbers are under [Status](#status). Check it in your own rig before
+> trusting it in a show.
 
 A printed lenticular sheet that shows one layer or the other, as an FFGL
-**mixer** for [Resolume](https://resolume.com) Arena and Avenue. The layer's
-opacity fader tilts the card. The same card also builds as an
+**mixer** for [Resolume](https://resolume.com) Arena and Avenue: the layer's
+opacity fader tilts the card. Think of the winking picture from the cereal box,
+scaled up for a video wall. It's the fleet's fourth FFGL *mixer*, after genlock, wipe
+and relay, and the same card also builds as an
 [OpenFX **transition**](#openfx--resolve-and-vegas-as-a-transition) for DaVinci
 Resolve and Vegas Pro, tilted by the transition itself.
 
 ![A lenticular card mid-flip, with a slight pitch mismatch](docs/hero.png)
 
 <sub>The repo's two test cards through the plugin at Opacity 0.47 with the print
-detuned from 60 to 62.7 periods a width — rendered by `lntest`, the offline
-harness, not captured from Resolume. Each 21-pixel lens shows one sample of
+detuned from 60 to 62.7 periods a width, rendered by `lntest` (the offline
+harness) rather than captured from Resolume. Each 21-pixel lens shows one sample of
 whichever picture its focus lands on, so the picture is stepped; the ridges
 catch the light as thin stripes; and because the print's pitch misses the
 lens's, the flip happens in bands 466 px (about a third of the picture) apart, soft
 where the focus straddles both strips.</sub>
 
-**[Try it in your browser](https://lenticular-demo.stoatworks-labs.com)** — the
+**[Try it in your browser](https://lenticular-demo.stoatworks-labs.com)**: the
 plugin's own shader in WebGL2 with its parameter conversions ported to
-JavaScript, flipping between two generated clips. A port, not the plugin: the
-page lists everything it does not reproduce, starting with the fact that in
-Resolume the card is tilted by the layer's opacity fader, not a slider.
+JavaScript, flipping between two generated clips. It's a port rather than the
+plugin, and the page lists everything it doesn't reproduce, starting with the fact
+that in Resolume the card is tilted by the layer's opacity fader, not a slider.
 
 [![Lenticular — a printed lenticular card that shows one layer or the other, for Resolume](docs/video-thumb.png)](https://www.youtube.com/watch?v=I9bclzMmib4)
 
-*[Watch it](https://www.youtube.com/watch?v=I9bclzMmib4) — 51 seconds:
+*[Watch it](https://www.youtube.com/watch?v=I9bclzMmib4) (51 seconds):
 the fader tilting the card while the flip travels across it for a near viewer,
 the whole card flipping at once with the viewer at infinity, the ghost of a wide
 focus spot, moiré bands from a print pitch of 64 under 60 lenses, the card turned
 past the edge of its viewing zone so it flips back, and 16 coarse lenses with the
-light swinging across the ridges. Every frame is the real plugin's output: an
-FFGL plugin has no window, so the footage is rendered by this repository's own
-offline harness (`lntest --pipe`, driven by a cue sheet) rather than filmed off a
-screen, and the two pictures are Resolume's bundled demo media.*
+light swinging across the ridges. It's all the plugin's own output. An FFGL plugin
+doesn't have a window to film, so the footage comes from this repo's offline
+harness (`lntest --pipe`, driven by a cue sheet) rather than a screen recording,
+and the two pictures are Resolume's bundled demo media.*
 
 <!-- downloads:start -->
 
@@ -109,27 +101,27 @@ Model the lens and the print, and everything a real card does falls out:
 
 - **The flip.** A lens of focal length F focuses the rays arriving at angle t
   onto the print at F tan t from its axis. Square on that is the edge between
-  the strips; tilt one way and it is on A, the other and it is on B; tilt past
+  the strips; tilt one way and it's on A, the other and it's on B; tilt past
   atan( 1 / 2F ) and the next lens's strips come round and the card flips back.
-- **The ghost.** A real lens does not focus to a point. The eye sees the mean of
+- **The ghost.** A real lens doesn't focus to a point. The eye sees the mean of
   the print across the focus spot, so near the flip it sees both pictures at
   once, and strip bleed on the print softens it further.
-- **Moiré.** If the print's interleave pitch does not exactly match the lens
+- **Moiré.** If the print's interleave pitch doesn't exactly match the lens
   pitch, each lens lands at a slightly different phase of the print, so different
   parts of the card flip at different angles and **bands** of A and B, of period
-  1 / | 1/p_L − 1/p_P |, sweep across the picture as it tilts. That is exactly
-  what a misregistered card looks like.
+  1 / | 1/p_L − 1/p_P |, sweep across the picture as it tilts. That's just what
+  a misregistered card looks like.
 - **The sweep.** A viewer at a finite distance sees each column at its own
-  angle, so the card does not flip all at once: the edge travels across it, at
+  angle, so the card doesn't flip all at once: the edge travels across it, at
   x = D sin T from the centre.
 - **The ridged look.** Each lens shows one sample of the picture, so the picture
   is stepped at the lens pitch, and the ridges catch the light.
 
 The interleave can squeeze each picture into its strips, as a real one does
 (each strip holds its picture's band of one lens width, compressed), or not
-(each strip is a window on the picture where it is). That is `Squeeze`.
+(each strip is a window on the picture where it is). That's `Squeeze`.
 
-**It is a mixer, not an effect.** It needs a layer below it: that layer is A,
+**It's a mixer, not an effect.** It needs a layer below it: that layer is A,
 printed in each lens's first strip, and the clip on this layer is B, in the
 second. The layer's opacity tilts the card from A (0) to B (1).
 
@@ -138,9 +130,9 @@ second. The layer's opacity tilts the card from A (0) to B (1).
 **Print** — Squeeze (on: the strips hold each picture squeezed, as a real
 interleave does), Interleave Pitch (the print's periods of one A and one B strip
 across the picture width, 4 to 480) and Bleed (the ramp between two strips, as a
-fraction of a strip). Squeeze is first on purpose: Resolume Arena does not show
+fraction of a strip). Squeeze is first on purpose: Resolume Arena doesn't show
 a mixer's first parameter (measured on genlock, wipe, relay and this plugin), so index 0
-holds a control whose default — on — is right if nobody can ever reach it.
+holds a control whose default (on) is right if nobody can ever reach it.
 
 **Lens** — Lens Pitch (lenses across the picture width, on the same scale as the
 print's: the same slider position is the same pitch, which is what matched
@@ -152,14 +144,14 @@ infinity at the top of the slider, where the whole card flips at once).
 **View** — Opacity (the tilt), Angle Range (how far Opacity 0 and 1 tilt the
 card, up to 45°), Ridge Shine (the ridges' highlight and shading, and a slight
 residual magnification in each lens) and Light Angle. **Opacity is the tilt**,
-and it is named Opacity on purpose: Resolume binds a mixer parameter of that
+and it's named Opacity on purpose: Resolume binds a mixer parameter of that
 name to the **layer's opacity fader**, and a layer transition ramps it
 (measured on relay), so the layer's own fader, or a transition, tilts the card.
 
 ## OpenFX — Resolve and Vegas, as a transition
 
 The same card also builds as an **OpenFX transition**. In a host with an OpenFX
-Transition context — DaVinci Resolve and Vegas Pro — it is listed among the
+Transition context (DaVinci Resolve and Vegas Pro) it's listed among the
 transitions as **Stoatworks → Lenticular**, and the transition's own progress
 tilts the card. The mixer's two layers and its fader map one to one:
 
@@ -180,8 +172,8 @@ Windows  C:\Program Files\Common Files\OFX\Plugins\
 Linux    /usr/OFX/Plugins/
 ```
 
-**It is the same card.** Every other control is the FFGL build's — the same
-names, 0..1 ranges, defaults and groups (Print, Lens, View) — and the same
+**It's the same card.** Every other control is the FFGL build's (the same
+names, 0..1 ranges, defaults and groups: Print, Lens, View), and so is the
 arithmetic: the OpenFX build links the FFGL build's own parameter mappings,
 lens setup and uniform computation (`source/Card.h`), and renders each pixel
 with a line-for-line C++ transcription of the card shader, bilinear sampling
@@ -198,26 +190,26 @@ What differs from the FFGL build, and why:
 - **A transition, and nothing else.** A one-input filter would have nothing to
   flip to, and a General-context node would be a different product (a
   two-input node with a tilt slider of its own) that would, in Resolve, also
-  appear among the clip effects. So a host with no Transition context — Nuke
-  among them — does not list this build at all.
+  appear among the clip effects. So a host with no Transition context (Nuke
+  among them) doesn't list this build at all.
 - **Clean ends: two controls of its own, Ends and End Length** (group Ends,
-  after everything the Resolume build has). The lens has no end stops — the
+  after everything the Resolume build has). The lens has no end stops (the
   card at Transition 0 is the outgoing clip *through the lens*, stepped and
-  ridged — so a transition that showed the card from its first frame to its
+  ridged), so a transition that showed the card from its first frame to its
   last would cut to it and away from it, which on a timeline reads as a
   glitch. **Ends = Fade**, the default, starts on exactly SourceFrom and
   finishes on exactly SourceTo: over the first **End Length** of the
   transition (0 to 0.5 of it, 0.15 by default) the card fades in from the
   plain outgoing clip, and over the last it fades out to the plain incoming
-  one — a smoothstep crossfade, so there is no kink, with the card's own tilt
-  running throughout. At exactly 0 and 1 the plugin tells the host it is the
+  one. It's a smoothstep crossfade, so there's no kink, with the card's own tilt
+  running throughout. At exactly 0 and 1 the plugin tells the host it's the
   clip (`isIdentity`) and, if asked to render anyway, copies the clip's
   pixels, so the ends are byte-identical to the clips. Resolve never asks for
   exactly 0 or 1, though: on its Edit page frame n of an N-frame transition is
   rendered at Transition (n + ½) / N, so the transition's first and last frames
-  still carry a trace of the card — **5%** of it on a 24-frame transition at the
+  still carry a trace of the card (**5%** of it on a 24-frame transition at the
   default End Length, at most 12 of 255 off the plain clip, and more on a
-  shorter transition or End Length — and the plain clips are the frames either
+  shorter transition or End Length), and the plain clips are the frames either
   side. **Ends = Cut** is the card from the first frame to the last: the
   Resolume build's behaviour, and this build's output before the ends existed,
   bit for bit.
@@ -228,12 +220,12 @@ What differs from the FFGL build, and why:
 
 Nothing else is missing: the FFGL build has no audio, no clock, no buffer and
 no presets, so every frame was already a pure function of the two inputs and
-the parameters at that frame — which is exactly what a host that renders frames
-out of order, alone and on several threads needs.
+the parameters at that frame, which is what a host that renders frames out of
+order, alone and on several threads needs.
 
 ## Build
 
-Needs CMake and the Resolume FFGL SDK, which is a submodule.
+You'll need CMake and the Resolume FFGL SDK, which is a submodule.
 
 ```bash
 git clone --recursive https://github.com/stoatworks-labs/lenticular
@@ -247,10 +239,10 @@ macOS builds universal (arm64 + x86_64) by default. Add
 `-DCMAKE_OSX_ARCHITECTURES=arm64` for a faster development build.
 
 The same build makes the OpenFX transition, `build/Lenticular.ofx.bundle`
-(`-DBUILD_OFX=OFF` to skip it). `cmake --install` does not install it: copy it
+(`-DBUILD_OFX=OFF` to skip it). `cmake --install` doesn't install it: copy it
 into the OpenFX folder above by hand. With `-DLENTICULAR_BUILD_FFGL=OFF` the
-configure needs nothing but a compiler — no FFGL SDK, no GLEW — and builds the
-OpenFX plugin alone; that is how the Linux release job builds it.
+configure needs nothing but a compiler (no FFGL SDK, no GLEW) and builds the
+OpenFX plugin alone; that's how the Linux release job builds it.
 
 The install path is **Extra Effects**, although this is a mixer. Resolume has
 one FFGL folder, and sources, effects and mixers all load from it: genlock, wipe
@@ -259,8 +251,8 @@ layer's Blend Mode and transition.
 
 ## Building and testing
 
-The harness renders the real plugin class headlessly, with **two** inputs —
-`--input-a` is A, the layer below; `--input-b` is B, this layer — which may be
+The harness renders the plugin's own class headless, with **two** inputs
+(`--input-a` is A, the layer below; `--input-b` is B, this layer), which may be
 different sizes, with different hardware padding, rendered to a third size.
 
     ./build/lntest --out /tmp/frame.png     both cards, through the plugin
@@ -283,10 +275,10 @@ different sizes, with different hardware padding, rendered to a third size.
 
 Every check runs at **two rasters**, 640×360 and 320×180, on this Mac's GPU
 **and** on Apple's software renderer, and every tolerance is derived from
-something stated — a float's rounding through a counted number of operations,
+something stated (a float's rounding through a counted number of operations,
 one source texel, one lens, a Hann window's leakage from the picture's own other
-spectral lines, a ramp's two kinks in a pixel sum — rather than from the number
-this machine printed first. Each check carries a **negative control**, shipped
+spectral lines, a ramp's two kinks in a pixel sum) rather than from whatever
+number this machine printed first. Each check carries a **negative control**, shipped
 in the plugin as a fault switch the harness can throw: A's MaxUV folded into the
 vertex shader, the focus at F sin t instead of F tan t, the viewer's distance
 ignored, the lens pitch forced to the print's, the tilt reversed.
@@ -294,7 +286,7 @@ ignored, the lens pitch forced to the print's, the tilt reversed.
 
 ## Status
 
-**v0.2.0, which added the OpenFX transition, and honestly early.** Verified by
+**v0.2.0, which added the OpenFX transition, and still early days.** Verified by
 measurement on an Apple M4 Max, macOS 26.4.1, 2026-09-25 unless dated, at
 640×360 **and** 320×180 unless stated, on the GPU and on Apple's software
 renderer:
@@ -325,32 +317,31 @@ renderer:
 
 Run `tools/verify.sh` before believing any of it.
 
-**Not done, and the list is honest.** Lenticular has **never been loaded into
-Resolume on macOS**. In Arena on Windows it was probed over REST and read back
-from its own log (the table above); no frame of its picture inside Resolume has
-been captured, so a correct render there is not yet shown. **A transition that
-uses it ends with a pop**: Arena's last transition frame had Opacity 0.944, which
-is the new clip seen through the lens, and the next frame is the plain clip — a
-consequence of the lens having no end stops, inferred from the log rather than
-seen. The harness has run on two rasterisers, this Mac's GPU and Apple's software
-renderer; Mesa llvmpipe has compiled and run the shaders in Arena, but no check
-has been read off it. The ridge highlight, the edge
-shading and the residual magnification are looks, not a model of any sheet; the
-lens is a thin lens in air, with no refraction into the plastic. No presets.
-The browser demo is a port, not the plugin.
+**What isn't done yet.** Lenticular has **never been loaded into Resolume on
+macOS**. In Arena on Windows it was probed over REST and read back from its own
+log (the table above); no frame of its picture inside Resolume has been captured,
+so a correct render there isn't shown yet. **A transition that uses it ends with a
+pop**: Arena's last transition frame had Opacity 0.944, which is the new clip seen
+through the lens, and the next frame is the plain clip. That's a consequence of the
+lens having no end stops, inferred from the log rather than seen. The harness has
+run on two rasterisers, this Mac's GPU and Apple's software renderer; Mesa llvmpipe
+has compiled and run the shaders in Arena, but no check has been read off it. The
+ridge highlight, the edge shading and the residual magnification are looks, not a
+model of any sheet, and the lens is a thin lens in air, with no refraction into the
+plastic. No presets. The browser demo is a port, not the plugin.
 
 **The OpenFX transition has been in one production host: DaVinci Resolve
 Studio 21.1 on macOS**, on the Edit page, where it rendered byte for byte what
 the test host renders, with the clips the right way round (the table above).
 That was one transition at the defaults between opaque cards at full
-resolution, placed with Resolve's scripting API: how Resolve hands it
-premultiplied alpha, a proxy render scale or clips of another size has not been
-seen, and it has not been timed there. Under Fade, Resolve's first and last
-transition frames keep a trace of the card (above). It has **never been loaded
-into Vegas**. CI builds it on macOS, Windows and Linux and dlopens it on Rocky
-8; it has never been loaded on Windows or Linux by a host.
+resolution, placed with Resolve's scripting API. I haven't seen how Resolve hands
+it premultiplied alpha, a proxy render scale or clips of another size, and it
+hasn't been timed there. Under Fade, Resolve's first and last transition frames
+keep a trace of the card (above). It's **never been loaded into Vegas**. CI builds
+it on macOS, Windows and Linux and dlopens it on Rocky 8; it's never been loaded on
+Windows or Linux by a host.
 
-[AGENTS.md](AGENTS.md) has the full list of what is assumed rather than
+[AGENTS.md](AGENTS.md) has the full list of what's assumed rather than
 measured, the open questions, and the traps.
 
 <!-- attributions:start -->
