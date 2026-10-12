@@ -302,7 +302,7 @@ renderer:
 | Opacity | 21 steps rise strictly, from −6.34019° to +6.34019°, each within **5.5e-8 rad** of (2o − 1) × Angle Range |
 | Mutation | one character of the shipped GLSL — the strip edge moved a tenth of a period off the lens axis — fails **3 of 3** `--flip` crossings; the shipped text through the same hook passes and renders the default path's bytes. By hand: the viewer's offset added instead of subtracted fails **17** `--distance` assertions and nothing else |
 | Negative controls | every one fails its check: folded MaxUV (4 and 5 assertions), F sin t (2 crossings), distance ignored (2 of 2 tilts), pitch locked (2), tilt reversed (not monotone; sweep the wrong way) |
-| No dead controls | all **11** controls change the picture at 480×270, both inputs present; the other four parameters are the About block |
+| No dead controls | all **11** controls change the picture at 480×270, both inputs present; the other five parameters are the About block |
 | Pipe | 3 frames in, 3 out; Opacity ramps and Squeeze steps between cues; a closed stdout is **exit 1** |
 | macOS binary | universal (`x86_64 arm64`), exports `plugMain`, ad-hoc signs |
 | Host metadata | `oxbow probe` reads **SW Lenticular / LN01 / mixer / inputs 2..2**, parameter 0 **Squeeze** |

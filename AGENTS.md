@@ -576,10 +576,10 @@ behaves differently is a host behaviour nobody has measured, and the base class'
 
 **No presets.** Eleven controls in three groups.
 
-**The About block is a provisional hand copy**, with `guide = ""`: no user guide
-exists, and the links header leaves a missing link out rather than showing a
-button that opens a 404. Three buttons: Project page, Source on GitHub, Support
-the work.
+**The About block is generated** by the backend's `sync-about.py` (since
+806c9ce). The links header leaves a missing link out rather than showing a
+button that opens a 404; with the user guide published there are four buttons:
+User guide, Project page, Source on GitHub, Support the work.
 
 ---
 
