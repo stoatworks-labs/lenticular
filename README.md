@@ -20,6 +20,8 @@ and relay, and the same card also builds as an
 [OpenFX **transition**](#openfx--resolve-and-vegas-as-a-transition) for DaVinci
 Resolve and Vegas Pro, tilted by the transition itself.
 
+The [project page](https://stoatworks-labs.com/software/lenticular/) has the downloads, the [user guide](https://stoatworks-labs.com/software/lenticular/guide/) and the video.
+
 ![A lenticular card mid-flip, with a slight pitch mismatch](docs/hero.png)
 
 <sub>The repo's two test cards through the plugin at Opacity 0.47 with the print
